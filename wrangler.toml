@@ -1,0 +1,5 @@
+name = "surajadh"
+pages_build_output_dir = "./dist"  # or your build output directory
+
+compatibility_date = "2026-05-29"
+compatibility_flags = [ "nodejs_compat" ]
