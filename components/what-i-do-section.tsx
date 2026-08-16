@@ -92,8 +92,8 @@ const services = [
 
 export function WhatIDoSection() {
   return (
-    <section id="about" className="relative py-28">
-      <div className="container mx-auto px-8">
+    <section id="what-i-do" className="relative py-28">
+      <div className="site-shell">
         <div className="grid items-center gap-16 lg:grid-cols-2">
           {/* Left Side */}
           <motion.div
@@ -171,7 +171,7 @@ export function WhatIDoSection() {
                       relative z-10
                       flex h-16 w-16 items-center justify-center
                       
-                      text-slate-700
+                      text-foreground/80
                       transition-all duration-300
                       group-hover/icon:scale-[1.03]
                       group-hover/icon:text-[#5F66E9]

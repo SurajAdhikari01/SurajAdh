@@ -1,169 +1,41 @@
-"use client"
+"use client";
 
-import { motion } from "framer-motion"
-import { ArrowRight } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { motion } from "framer-motion";
+import { ArrowUpRight, GitFork, Github, Star } from "lucide-react";
+import type { GitHubShowcase } from "@/lib/github";
 
-const projects = [
-  {
-    category: "AI/NLP",
-    title: "Legal Document Analyzer",
-    description: "AI tool that extracts, summarizes and analyzes legal documents with high accuracy.",
-    tags: ["Python", "NLP", "FastAPI"],
-    bgGradient: "from-violet-50/80 via-slate-50 to-blue-50/60",
-    accentColor: "bg-violet-500",
-  },
-  {
-    category: "ML",
-    title: "House Price Prediction",
-    description: "ML model that predicts house prices using advanced regression techniques.",
-    tags: ["Scikit-learn", "XGBoost", "Pandas"],
-    bgGradient: "from-emerald-50/80 via-cyan-50/60 to-teal-50/40",
-    accentColor: "bg-emerald-500",
-  },
-  {
-    category: "CV",
-    title: "Smart Waste Classifier",
-    description: "Computer vision model that classifies waste into categories for smart recycling systems.",
-    tags: ["PyTorch", "ResNet", "OpenCV"],
-    bgGradient: "from-blue-50/80 via-indigo-50/60 to-sky-50/40",
-    accentColor: "bg-blue-500",
-  },
-]
+const featuredFallback = [
+  { id: 1, name: "Legal Document Analyzer", description: "AI-assisted extraction, summaries, and risk analysis for dense legal documents.", html_url: "https://github.com/SurajAdhikari01", homepage: null, language: "Python", stargazers_count: 0, forks_count: 0, topics: ["nlp", "fastapi"], updated_at: "", fork: false },
+  { id: 2, name: "House Price Prediction", description: "Explainable property valuations from complex and fragmented market signals.", html_url: "https://github.com/SurajAdhikari01", homepage: null, language: "Python", stargazers_count: 0, forks_count: 0, topics: ["machine-learning", "xgboost"], updated_at: "", fork: false },
+  { id: 3, name: "Smart Waste Classifier", description: "Real-time computer vision that makes everyday recycling more accurate.", html_url: "https://github.com/SurajAdhikari01", homepage: null, language: "Python", stargazers_count: 0, forks_count: 0, topics: ["pytorch", "computer-vision"], updated_at: "", fork: false },
+];
 
-export function ProjectsSection() {
+const swatches = ["project-indigo", "project-lime", "project-coral", "project-blue", "project-violet", "project-mono"];
+
+export function ProjectsSection({ github }: { github: GitHubShowcase }) {
+  const repositories = github.repositories.length ? github.repositories : featuredFallback;
   return (
-    <section id="work" className="relative py-28">
-      <div className="container mx-auto px-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
-          className="mb-16 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-medium tracking-tight text-foreground">Featured Projects</h2>
-            <div className="hidden h-px w-16 bg-gradient-to-r from-border to-transparent sm:block" />
-            <motion.div 
-              animate={{ scale: [1, 1.3, 1], opacity: [0.5, 1, 0.5] }}
-              transition={{ repeat: Infinity, duration: 2.5 }}
-              className="hidden h-2 w-2 rounded-full bg-primary sm:block" 
-            />
-          </div>
-          <Button
-            variant="ghost"
-            className="group gap-2 rounded-full border border-border/60 px-5 text-muted-foreground transition-all hover:border-foreground/30 hover:bg-muted/50 hover:text-foreground"
-          >
-            View all projects
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-          </Button>
-        </motion.div>
-
-        {/* Projects Grid */}
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project, index) => (
-            <motion.div
-              key={project.title}
-              initial={{ opacity: 0, y: 40 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 * index }}
-              viewport={{ once: true }}
-              whileHover={{ y: -8 }}
-              className="group relative"
-            >
-              <div className="relative overflow-hidden rounded-3xl border border-border/40 bg-card shadow-sm transition-all duration-500 hover:border-border/60 hover:shadow-2xl hover:shadow-primary/5">
-                {/* Top - Text Content */}
-                <div className="relative p-7">
-                  {/* Category badge */}
-                  <span className="mb-4 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                    <span className={`h-1.5 w-1.5 rounded-full ${project.accentColor}`} />
-                    {project.category}
-                  </span>
-                  
-                  <h3 className="mb-3 text-xl font-semibold tracking-tight text-foreground">
-                    {project.title}
-                  </h3>
-                  
-                  <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
-                    {project.description}
-                  </p>
-                  
-                  {/* Arrow Button */}
-                  <motion.button 
-                    whileHover={{ scale: 1.1, rotate: -10 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-shadow hover:shadow-xl"
-                  >
-                    <ArrowRight className="h-4 w-4" />
-                  </motion.button>
-                </div>
-                
-                {/* Bottom - Preview Area with glass morphism */}
-                <div className={`relative h-44 bg-gradient-to-br ${project.bgGradient} overflow-hidden`}>
-                  {/* Glass card preview */}
-                  <div className="absolute inset-5">
-                    <motion.div 
-                      initial={{ rotate: -4, y: 8, scale: 0.98 }}
-                      whileHover={{ rotate: 0, y: 0, scale: 1 }}
-                      transition={{ duration: 0.4, ease: "easeOut" }}
-                      className="relative h-full w-full overflow-hidden rounded-2xl border border-white/60 bg-white/70 shadow-xl backdrop-blur-md"
-                    >
-                      {/* Window dots */}
-                      <div className="absolute left-3 top-3 flex gap-1.5">
-                        <div className="h-2 w-2 rounded-full bg-red-400/60" />
-                        <div className="h-2 w-2 rounded-full bg-yellow-400/60" />
-                        <div className="h-2 w-2 rounded-full bg-green-400/60" />
-                      </div>
-                      
-                      {/* Content placeholder lines */}
-                      <div className="absolute left-3 right-3 top-8 space-y-2">
-                        <div className="h-2 w-3/4 rounded bg-slate-200/80" />
-                        <div className="h-2 w-1/2 rounded bg-slate-200/60" />
-                      </div>
-                      
-                      {/* Chart/visual placeholder */}
-                      <div className="absolute bottom-3 left-3 right-3 flex items-end gap-1">
-                        {[40, 65, 45, 80, 55, 70, 50].map((h, i) => (
-                          <motion.div
-                            key={i}
-                            initial={{ height: 0 }}
-                            whileInView={{ height: `${h}%` }}
-                            transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
-                            viewport={{ once: true }}
-                            className={`flex-1 rounded-t ${project.accentColor}/30`}
-                            style={{ maxHeight: 48 }}
-                          />
-                        ))}
-                      </div>
-                    </motion.div>
-                  </div>
-                  
-                  {/* Floating particles */}
-                  <motion.div
-                    animate={{ y: [-4, 4, -4], opacity: [0.4, 0.8, 0.4] }}
-                    transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-                    className="absolute right-5 top-3 h-1.5 w-1.5 rounded-full bg-primary"
-                  />
-                </div>
-
-                {/* Tags */}
-                <div className="flex flex-wrap gap-2 border-t border-border/30 bg-muted/20 p-5">
-                  {project.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border/40 bg-background/80 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-all group-hover:border-border/60 group-hover:bg-background"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
+    <section id="work" className="relative scroll-mt-8 overflow-hidden py-28">
+      <div className="site-shell">
+        <div className="mb-12 grid gap-8 lg:grid-cols-[1fr_.72fr] lg:items-end">
+          <div><div className="eyebrow mb-6"><span>Selected work</span><i /></div><h2 className="max-w-3xl text-4xl font-medium leading-[.98] tracking-[-.05em] sm:text-6xl lg:text-7xl">Code with a point of view.</h2></div>
+          <div className="flex items-end justify-between gap-6 border-t border-foreground/12 pt-5"><p className="max-w-xs text-xs leading-6 text-muted-foreground">A living feed from GitHub—fresh repositories, honest metrics, zero hard-coded vanity.</p><a href={github.profile.html_url} target="_blank" rel="noreferrer" className="group grid h-12 w-12 shrink-0 place-items-center rounded-full border border-foreground/20 transition-colors hover:bg-foreground hover:text-background"><ArrowUpRight className="h-4 w-4 transition-transform group-hover:rotate-45" /></a></div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {repositories.map((repo, index) => (
+            <motion.a key={repo.id} href={repo.homepage || repo.html_url} target="_blank" rel="noreferrer" initial={{ opacity: 0, y: 22 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-60px" }} transition={{ delay: index * .06 }} className={`project-card group ${swatches[index % swatches.length]}`}>
+              <div className="flex items-start justify-between"><span className="font-mono text-[9px] uppercase tracking-[.16em] opacity-55">Repository / {String(index + 1).padStart(2,"0")}</span><ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-1 group-hover:translate-x-1" /></div>
+              <div className="project-mark my-12"><Github className="h-9 w-9" strokeWidth={1.3} /></div>
+              <h3 className="max-w-[18rem] text-2xl font-semibold leading-tight tracking-[-.035em]">{repo.name.replaceAll("-", " ")}</h3>
+              <p className="mt-3 line-clamp-2 min-h-10 max-w-sm text-xs leading-5 opacity-65">{repo.description || "An evolving experiment in useful software and thoughtful engineering."}</p>
+              <div className="mt-8 flex items-end justify-between gap-4 border-t border-current/15 pt-4"><div className="flex flex-wrap gap-2"><span className="rounded-full border border-current/20 px-2.5 py-1 text-[9px]">{repo.language || "Code"}</span>{repo.topics.slice(0,1).map(topic => <span key={topic} className="rounded-full border border-current/20 px-2.5 py-1 text-[9px]">{topic}</span>)}</div><div className="flex shrink-0 items-center gap-3 font-mono text-[9px] opacity-60"><span className="flex items-center gap-1"><Star className="h-3 w-3" />{repo.stargazers_count}</span><span className="flex items-center gap-1"><GitFork className="h-3 w-3" />{repo.forks_count}</span></div></div>
+            </motion.a>
           ))}
+        </div>
+        <div className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3">
+          {[{ label: "Public repositories", value: github.profile.public_repos || `${repositories.length}+` }, { label: "Stars earned", value: github.totalStars }, { label: "GitHub signal", value: "Live" }].map((stat) => <div key={stat.label} className="flex items-center justify-between bg-background px-5 py-5"><span className="text-[10px] uppercase tracking-[.14em] text-muted-foreground">{stat.label}</span><strong className="font-mono text-sm">{stat.value}</strong></div>)}
         </div>
       </div>
     </section>
-  )
+  );
 }

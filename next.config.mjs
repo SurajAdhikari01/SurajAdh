@@ -1,7 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
+  agentRules: false,
+  experimental: {
+    cpus: 2,
+    webpackMemoryOptimizations: true,
+  },
+  turbopack: {
+    root: process.cwd(),
   },
   images: {
     unoptimized: true,

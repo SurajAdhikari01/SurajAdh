@@ -15,7 +15,7 @@ interface Particle {
 export function FloatingParticles() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const particlesRef = useRef<Particle[]>([])
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -23,6 +23,10 @@ export function FloatingParticles() {
 
     const ctx = canvas.getContext("2d")
     if (!ctx) return
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const frameInterval = 1000 / 30
+    let lastFrame = 0
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth
@@ -32,7 +36,7 @@ export function FloatingParticles() {
     window.addEventListener("resize", resizeCanvas)
 
     // Fewer particles for premium, subtle feel
-    const particleCount = 30
+    const particleCount = window.innerWidth < 768 ? 12 : 20
     particlesRef.current = Array.from({ length: particleCount }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
@@ -42,7 +46,7 @@ export function FloatingParticles() {
       opacity: Math.random() * 0.3 + 0.1,
     }))
 
-    const animate = () => {
+    const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
       const particles = particlesRef.current
@@ -79,17 +83,56 @@ export function FloatingParticles() {
           }
         })
       })
+    }
 
+    const animate = (timestamp: number) => {
+      if (document.hidden || reducedMotion.matches) {
+        animationRef.current = undefined
+        return
+      }
+
+      if (timestamp - lastFrame >= frameInterval) {
+        lastFrame = timestamp
+        draw()
+      }
       animationRef.current = requestAnimationFrame(animate)
     }
 
-    animate()
+    const start = () => {
+      if (animationRef.current || document.hidden || reducedMotion.matches) return
+      lastFrame = 0
+      animationRef.current = requestAnimationFrame(animate)
+    }
+
+    const stop = () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current)
+      animationRef.current = undefined
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) stop()
+      else start()
+    }
+
+    const handleMotionChange = () => {
+      if (reducedMotion.matches) {
+        stop()
+        draw()
+      } else {
+        start()
+      }
+    }
+
+    draw()
+    start()
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    reducedMotion.addEventListener("change", handleMotionChange)
 
     return () => {
       window.removeEventListener("resize", resizeCanvas)
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      reducedMotion.removeEventListener("change", handleMotionChange)
+      stop()
     }
   }, [])
 
