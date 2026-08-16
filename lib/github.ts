@@ -54,11 +54,10 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
     const [profileResponse, reposResponse] = await Promise.all([
       fetch(`https://api.github.com/users/${username}`, {
         headers,
-        next: { revalidate: 3600 },
       }),
       fetch(
         `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
-        { headers, next: { revalidate: 3600 } },
+        { headers },
       ),
     ]);
 

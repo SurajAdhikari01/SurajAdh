@@ -18,9 +18,9 @@ export function HeroSection() {
           transition={{ duration: 0.7 }}
           className="relative z-30 grid grid-cols-2 items-center border-y border-foreground/12 py-3 font-mono text-[8px] uppercase tracking-[.18em] text-muted-foreground sm:grid-cols-[1fr_auto_1fr] sm:text-[9px]"
         >
-          <span className="flex items-center gap-2"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-lime-400" />Available / 2026</span>
+          <span className="flex items-center gap-2"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-lime-400" />Available remotely</span>
           <span className="hidden items-center gap-2 sm:flex"><Circle className="h-2.5 w-2.5 fill-primary text-primary" />27.7172° N · 85.3240° E</span>
-          <span className="text-right">Independent engineer / KTM</span>
+          <span className="text-right">Remote engineer / Nepal</span>
         </motion.header>
 
         <div className="relative flex flex-1 items-center py-14 sm:py-16 lg:py-10">
@@ -56,7 +56,7 @@ export function HeroSection() {
                 transition={{ delay: 0.65 }}
                 className="max-w-[13rem] text-[10px] font-medium uppercase leading-5 tracking-[.16em] text-muted-foreground sm:max-w-[16rem]"
               >
-                Software engineering, artificial intelligence &amp; expressive digital craft.
+                Suraj Adhikari — Nepal-based software engineer, AI engineer &amp; C++ developer.
               </motion.p>
               <span className="hidden -rotate-90 font-mono text-[8px] uppercase tracking-[.2em] text-muted-foreground lg:block">Scroll to inspect</span>
             </div>
@@ -83,7 +83,7 @@ export function HeroSection() {
             >
               <div className="flex items-start gap-3">
                 <Asterisk className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                <p className="max-w-xl text-sm leading-6 text-muted-foreground">I turn ambitious ideas into useful, unusual products—where rigorous code, emerging intelligence and a sharp visual point of view work as one.</p>
+                <p className="max-w-xl text-sm leading-6 text-muted-foreground">I build intelligent products, C++ and network software, and modern web systems for teams worldwide—combining rigorous engineering with a sharp visual point of view.</p>
               </div>
               <div className="flex items-center gap-2">
                 <a href="#work" className="group inline-flex h-12 items-center gap-5 rounded-full bg-foreground pl-5 pr-2 text-[10px] font-bold uppercase tracking-[.14em] text-background">

@@ -7,7 +7,7 @@
     "dev:turbo": "next dev --turbopack",
     "build": "next build --webpack",
     "build:turbo": "next build --turbopack",
-    "start": "next start",
+    "build:pages": "next build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

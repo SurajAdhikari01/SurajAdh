@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   agentRules: false,
+  output: 'export',
   experimental: {
     cpus: 2,
     webpackMemoryOptimizations: true,

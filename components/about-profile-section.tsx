@@ -7,7 +7,7 @@ const code = [
   ["2", "  constructor() {"],
   ["3", '    this.name = "Suraj";'],
   ["4", '    this.role = "Software Engineer";'],
-  ["5", '    this.focus = ["AI/ML", "Systems"];'],
+  ["5", '    this.focus = ["AI/ML", "C++", "Systems"];'],
   ["6", '    this.mission = "Build. Learn. Impact.";'],
   ["7", "  }"],
   ["8", ""],
@@ -24,7 +24,7 @@ export function AboutProfileSection() {
         <motion.div initial={{ opacity: 0, y: 22 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
           <div className="mb-7 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[.2em] text-[#686EF3]"><span>About me</span><span className="h-px w-8 bg-[#686EF3]/50" /></div>
           <h2 className="max-w-md text-3xl font-light leading-tight tracking-tight sm:text-4xl">I build things that solve <span className="font-medium text-[#686EF3]">real problems.</span></h2>
-          <p className="mt-6 max-w-md text-sm leading-7 text-muted-foreground">I love turning ideas into products using clean code, AI/ML and modern technologies. When I&apos;m not building, I&apos;m exploring new concepts, contributing to open source, or learning something new.</p>
+          <p className="mt-6 max-w-md text-sm leading-7 text-muted-foreground">I&apos;m a software and AI engineer from Nepal, working with C++, Python and modern web technologies. I collaborate remotely with clients and teams worldwide to turn ambitious ideas into reliable, useful products.</p>
           <span className="mt-8 block -rotate-6 font-serif text-2xl italic text-[#686EF3]">Suraj</span>
         </motion.div>
 
