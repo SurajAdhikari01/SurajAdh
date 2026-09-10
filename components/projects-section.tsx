@@ -40,21 +40,6 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
               </span>
             </h2>
           </div>
-          <div className="flex items-end justify-between gap-6 border-t border-foreground/12 pt-5">
-            <p className="max-w-xs text-xs leading-6 text-muted-foreground">
-              A living feed from GitHub—fresh repositories, honest metrics, zero
-              hard-coded vanity.
-            </p>
-            <a
-              href={github.profile.html_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="View all repositories on GitHub"
-              className="group grid h-12 w-12 shrink-0 place-items-center rounded-full border border-foreground/20 transition-colors hover:bg-foreground hover:text-background"
-            >
-              <ArrowUpRight className="h-4 w-4 transition-transform group-hover:rotate-45" />
-            </a>
-          </div>
         </div>
         {!repositories.length && (
           <div className="border-y border-border py-12">
