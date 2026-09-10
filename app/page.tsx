@@ -2,7 +2,7 @@ import { Sidebar } from "@/components/sidebar";
 import { HeroSection } from "@/components/hero-section";
 import { WhatIDoSection } from "@/components/what-i-do-section";
 import { ProjectsSection } from "@/components/projects-section";
-import { PhilosophySection } from "@/components/philosophy-section";
+
 import { ContactSection } from "@/components/contact-section";
 import { AboutProfileSection } from "@/components/about-profile-section";
 import { TechStackSection } from "@/components/tech-stack-section";
@@ -63,18 +63,26 @@ export default async function Home() {
           __html: JSON.stringify(profileSchema).replace(/</g, "\\u003c"),
         }}
       />
-      <a href="#main-content" className="skip-link">Skip to content</a>
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
       <Sidebar />
       <main id="main-content" className="site-main relative overflow-x-clip">
         <div className="relative z-10">
-          <HeroSection projects={github.repositories.map(repo => ({ name: repo.name, url: repo.html_url, language: repo.language }))} />
+          <HeroSection
+            projects={github.repositories.map((repo) => ({
+              name: repo.name,
+              url: repo.html_url,
+              language: repo.language,
+            }))}
+          />
           <div id="about">
             <AboutProfileSection />
             <WhatIDoSection />
             <TechStackSection />
           </div>
           <ProjectsSection github={github} />
-          <PhilosophySection />
+
           <ContactSection />
         </div>
       </main>

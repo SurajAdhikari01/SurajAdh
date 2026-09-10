@@ -1,13 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Briefcase, FlaskConical, Home, Mail, Moon, Sun, User } from "lucide-react";
+import {
+  Briefcase,
+  FlaskConical,
+  Home,
+  Mail,
+  Moon,
+  Sun,
+  User,
+} from "lucide-react";
 
 const navItems = [
   { icon: Home, label: "Home", href: "#home" },
   { icon: User, label: "About", href: "#about" },
   { icon: Briefcase, label: "Work", href: "#work" },
-  { icon: FlaskConical, label: "Approach", href: "#ai-lab" },
+
   { icon: Mail, label: "Contact", href: "#contact" },
 ];
 
@@ -18,8 +26,14 @@ export function Sidebar() {
 
   useEffect(() => {
     let saved: string | null = null;
-    try { saved = localStorage.getItem("suraj-theme"); } catch { /* Theme still works without storage. */ }
-    const dark = saved ? saved === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    try {
+      saved = localStorage.getItem("suraj-theme");
+    } catch {
+      /* Theme still works without storage. */
+    }
+    const dark = saved
+      ? saved === "dark"
+      : window.matchMedia("(prefers-color-scheme: dark)").matches;
     setIsDark(dark);
     document.documentElement.classList.toggle("dark", dark);
 
@@ -130,24 +144,52 @@ export function Sidebar() {
     const next = !isDark;
     setIsDark(next);
     document.documentElement.classList.toggle("dark", next);
-    try { localStorage.setItem("suraj-theme", next ? "dark" : "light"); } catch { /* Keep the in-session choice. */ }
+    try {
+      localStorage.setItem("suraj-theme", next ? "dark" : "light");
+    } catch {
+      /* Keep the in-session choice. */
+    }
   };
 
   return (
     <nav className="floating-nav" aria-label="Primary navigation">
-      {navItems.map(item => {
+      {navItems.map((item) => {
         const Icon = item.icon;
         const active = activeItem === item.label;
         return (
-          <a key={item.label} href={item.href} className="nav-tile" aria-label={item.label} aria-current={active ? "location" : undefined}>
-            <Icon size={19} strokeWidth={active ? 1.9 : 1.55} aria-hidden="true" />
-            <span className="nav-tile-label" aria-hidden="true">{item.label}</span>
+          <a
+            key={item.label}
+            href={item.href}
+            className="nav-tile"
+            aria-label={item.label}
+            aria-current={active ? "location" : undefined}
+          >
+            <Icon
+              size={19}
+              strokeWidth={active ? 1.9 : 1.55}
+              aria-hidden="true"
+            />
+            <span className="nav-tile-label" aria-hidden="true">
+              {item.label}
+            </span>
           </a>
         );
       })}
-      <button type="button" className="nav-tile nav-theme" onClick={toggleTheme} aria-label="Toggle color theme" aria-pressed={isDark}>
-        {isDark ? <Sun size={18} strokeWidth={1.5} aria-hidden="true" /> : <Moon size={18} strokeWidth={1.5} aria-hidden="true" />}
-        <span className="nav-tile-label" aria-hidden="true">{isDark ? "Light mode" : "Dark mode"}</span>
+      <button
+        type="button"
+        className="nav-tile nav-theme"
+        onClick={toggleTheme}
+        aria-label="Toggle color theme"
+        aria-pressed={isDark}
+      >
+        {isDark ? (
+          <Sun size={18} strokeWidth={1.5} aria-hidden="true" />
+        ) : (
+          <Moon size={18} strokeWidth={1.5} aria-hidden="true" />
+        )}
+        <span className="nav-tile-label" aria-hidden="true">
+          {isDark ? "Light mode" : "Dark mode"}
+        </span>
       </button>
     </nav>
   );
