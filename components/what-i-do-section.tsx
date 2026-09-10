@@ -41,7 +41,7 @@ const services = [
       </svg>
     ),
     title: "Learn",
-    description: "AI/ML models that learn and adapt.",
+    description: "Low-level concepts, deeply understood.",
     accentClass:
       "absolute left-1 top-1 h-8 w-6 rounded-full bg-[#06B6D4]/75 blur-xs opacity-45 transition-all duration-500 group-hover/icon:translate-y-1 group-hover/icon:-translate-x-1",
   },
@@ -94,7 +94,7 @@ export function WhatIDoSection() {
   return (
     <section id="what-i-do" className="relative py-28">
       <div className="site-shell">
-        <div className="grid items-center gap-16 lg:grid-cols-2">
+        <div className="grid items-center gap-16 xl:grid-cols-[.9fr_1.1fr] xl:gap-20">
           {/* Left Side */}
           <motion.div
             initial={{ opacity: 0, x: -30 }}
@@ -108,11 +108,11 @@ export function WhatIDoSection() {
             </p>
 
             <h2 className="text-balance text-4xl font-light leading-tight tracking-tight text-foreground md:text-5xl lg:text-[3.35rem]">
-              Where <span className="font-medium">Engineering</span>
+              Where <span className="font-medium">Performance</span>
               <br />
               meets{" "}
               <span className="relative font-medium text-[#5F66E9]">
-                Intelligence.
+                Precision.
                 <motion.span
                   initial={{ width: 0 }}
                   whileInView={{ width: "100%" }}
@@ -130,7 +130,7 @@ export function WhatIDoSection() {
             whileInView={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.7, delay: 0.15 }}
             viewport={{ once: true }}
-            className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-4"
+            className="grid grid-cols-2 gap-x-8 gap-y-12 sm:grid-cols-4 sm:gap-x-10"
           >
             {services.map((service, index) => (
               <motion.div

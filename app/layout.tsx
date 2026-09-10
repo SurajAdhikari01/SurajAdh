@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Analytics } from '@vercel/analytics/next'
 import { siteDescription, siteName, siteTitle, siteUrl } from '@/lib/site'
 import './globals.css'
+import { MotionPreferences } from '@/components/motion-preferences'
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -14,13 +15,13 @@ export const metadata: Metadata = {
   category: 'technology',
   keywords: [
     'software engineer Nepal',
-    'AI engineer Nepal',
     'C++ developer Nepal',
+    'C++ systems engineer',
+    'systems programming',
     'network software engineer',
     'remote software engineer',
     'remote developer Nepal',
-    'machine learning engineer',
-    'web developer Nepal',
+    'performance engineering',
     'Suraj Adhikari',
   ],
   alternates: { canonical: '/' },
@@ -36,7 +37,7 @@ export const metadata: Metadata = {
         url: '/hero.png',
         width: 954,
         height: 954,
-        alt: 'Suraj Adhikari, software and AI engineer from Nepal',
+        alt: 'Suraj Adhikari, C++ and software engineer from Nepal',
       },
     ],
   },
@@ -84,7 +85,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="bg-background" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        {children}
+        <MotionPreferences>{children}</MotionPreferences>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

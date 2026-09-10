@@ -51,7 +51,7 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   try {
-    const [profileResponse, reposResponse] = await Promise.all([
+    const [profileResponse, reposResponse, profilePageResponse] = await Promise.all([
       fetch(`https://api.github.com/users/${username}`, {
         headers,
       }),
@@ -59,6 +59,9 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
         `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
         { headers },
       ),
+      fetch(`https://github.com/${username}`, {
+        headers: { "User-Agent": "SurajAdhikari-Portfolio/1.0" },
+      }),
     ]);
 
     if (!profileResponse.ok || !reposResponse.ok) {
@@ -67,7 +70,19 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
 
     const profile = (await profileResponse.json()) as GitHubProfile;
     const allRepositories = (await reposResponse.json()) as GitHubRepository[];
-    const repositories = allRepositories
+    const profileHtml = profilePageResponse.ok ? await profilePageResponse.text() : "";
+    const pinnedNames = Array.from(
+      profileHtml.matchAll(
+        /target&quot;:&quot;PINNED_REPO&quot;[\s\S]{0,1400}?href="\/[^"]+\/([^"]+)"/g,
+      ),
+      (match) => decodeURIComponent(match[1]).toLowerCase(),
+    ).slice(0, 6);
+
+    const pinnedRepositories = pinnedNames
+      .map((name) => allRepositories.find((repo) => repo.name.toLowerCase() === name))
+      .filter((repo): repo is GitHubRepository => Boolean(repo));
+
+    const rankedRepositories = allRepositories
       .filter((repo) => !repo.fork && repo.name.toLowerCase() !== "surajadh")
       .sort(
         (a, b) =>
@@ -75,6 +90,9 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       )
       .slice(0, 6);
+    const repositories = pinnedRepositories.length
+      ? pinnedRepositories
+      : rankedRepositories;
 
     return {
       profile,

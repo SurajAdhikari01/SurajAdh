@@ -4,7 +4,6 @@ import { WhatIDoSection } from "@/components/what-i-do-section";
 import { ProjectsSection } from "@/components/projects-section";
 import { PhilosophySection } from "@/components/philosophy-section";
 import { ContactSection } from "@/components/contact-section";
-import { FloatingParticles } from "@/components/floating-particles";
 import { AboutProfileSection } from "@/components/about-profile-section";
 import { TechStackSection } from "@/components/tech-stack-section";
 import { getGitHubShowcase } from "@/lib/github";
@@ -14,7 +13,7 @@ const profileSchema = {
   "@context": "https://schema.org",
   "@type": "ProfilePage",
   url: siteUrl,
-  name: `${siteName} — Software and AI Engineer`,
+  name: `${siteName} — C++ and Software Engineer`,
   description: siteDescription,
   mainEntity: {
     "@type": "Person",
@@ -24,9 +23,9 @@ const profileSchema = {
     url: siteUrl,
     image: `${siteUrl}/hero.png`,
     email: "surajadhikari01@icloud.com",
-    jobTitle: ["Software Engineer", "AI Engineer", "C++ Developer"],
+    jobTitle: ["C++ Engineer", "Software Engineer", "Systems Developer"],
     description:
-      "Remote software and AI engineer from Nepal building intelligent systems, machine learning products, C++ and network software, and modern web applications.",
+      "Remote C++ and software engineer from Nepal building performant systems, network software, developer tools, and dependable applications.",
     homeLocation: {
       "@type": "Place",
       name: "Kathmandu, Nepal",
@@ -37,9 +36,9 @@ const profileSchema = {
     },
     knowsAbout: [
       "Software engineering",
-      "Artificial intelligence",
-      "Machine learning",
       "C++",
+      "Systems programming",
+      "Performance engineering",
       "Network software development",
       "Python",
       "React",
@@ -64,11 +63,11 @@ export default async function Home() {
           __html: JSON.stringify(profileSchema).replace(/</g, "\\u003c"),
         }}
       />
-      <FloatingParticles />
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar />
-      <main className="site-main relative overflow-x-clip pb-24 md:ml-[5.5rem] md:pb-0">
+      <main id="main-content" className="site-main relative overflow-x-clip">
         <div className="relative z-10">
-          <HeroSection />
+          <HeroSection projects={github.repositories.map(repo => ({ name: repo.name, url: repo.html_url, language: repo.language }))} />
           <div id="about">
             <AboutProfileSection />
             <WhatIDoSection />
