@@ -5,7 +5,6 @@ import { ProjectsSection } from "@/components/projects-section";
 
 import { ContactSection } from "@/components/contact-section";
 import { AboutProfileSection } from "@/components/about-profile-section";
-import { TechStackSection } from "@/components/tech-stack-section";
 import { getGitHubShowcase } from "@/lib/github";
 import { siteDescription, siteName, siteUrl } from "@/lib/site";
 
@@ -55,6 +54,11 @@ const profileSchema = {
 
 export default async function Home() {
   const github = await getGitHubShowcase();
+  const terminalProjects = github.repositories.map((repo) => ({
+    name: repo.name,
+    url: repo.html_url,
+    language: repo.language,
+  }));
   return (
     <div className="relative min-h-screen bg-background">
       <script
@@ -66,20 +70,13 @@ export default async function Home() {
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
-      <Sidebar />
+      <Sidebar projects={terminalProjects} />
       <main id="main-content" className="site-main relative overflow-x-clip">
         <div className="relative z-10">
-          <HeroSection
-            projects={github.repositories.map((repo) => ({
-              name: repo.name,
-              url: repo.html_url,
-              language: repo.language,
-            }))}
-          />
+          <HeroSection />
           <div id="about">
             <AboutProfileSection />
             <WhatIDoSection />
-            <TechStackSection />
           </div>
           <ProjectsSection github={github} />
 

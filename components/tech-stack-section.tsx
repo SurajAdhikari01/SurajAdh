@@ -1,163 +1,168 @@
-import { ArrowUpRight } from "lucide-react";
+"use client";
 
-const disciplines = [
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+
+const stages = [
   {
-    number: "01",
-    title: "Own the memory.",
-    detail: "Lifetimes / RAII / Data layout",
-    copy: "Explicit ownership, predictable lifetimes, and data arranged with the machine in mind. The details underneath shape everything above.",
+    id: "01",
+    sourceLine: 0,
+    label: "TOKENIZATION",
+    status: "IMPLEMENTED",
+    note: "keywords · operators · literals",
+    title: "The lexer classifies the source.",
+    output: (
+      <div className="compiler-token-stream">
+        <span data-kind="keyword">KW_SURU</span>
+        <span>TK_LPAREN</span><span>TK_RPAREN</span><span>TK_ARROW</span>
+        <span data-kind="keyword">KW_DEU</span><span>TYPE_INT</span>
+        <span data-kind="identifier">IDENTIFIER(name)</span>
+        <span data-kind="keyword">KW_SUN</span>
+        <span data-kind="keyword">KW_JABA</span>
+        <span>OP_EQUAL_EQUAL</span>
+      </div>
+    ),
   },
   {
-    number: "02",
-    title: "Coordinate the work.",
-    detail: "Concurrency / Synchronization / Networking",
-    copy: "Think through how work moves, where state is shared, and what happens when timing changes. Correctness comes before cleverness.",
+    id: "02",
+    sourceLine: 2,
+    label: "PARSER CORE",
+    status: "IMPLEMENTED",
+    note: "lookahead · match · expect",
+    title: "A token cursor drives recursive descent.",
+    output: (
+      <pre className="compiler-code-output">{`current_token()
+  └── check(TokenType::JABA)
+        ├── match(...)
+        ├── advance()
+        └── parse_statement()`}</pre>
+    ),
   },
   {
-    number: "03",
-    title: "Make every cycle count.",
-    detail: "Algorithms / Profiling / Performance",
-    copy: "Understand the cost, find the bottleneck, and measure the change. Fast software starts with knowing where the time goes.",
+    id: "03",
+    sourceLine: 0,
+    label: "FUNCTION GRAMMAR",
+    status: "IMPLEMENTED",
+    note: "signature · return type · body",
+    title: "The function grammar is now recognized.",
+    output: (
+      <pre className="compiler-tree">{`function_decl
+  ::= SURU "(" params? ")"
+      "->" DEU "(" type ")"
+      block`}</pre>
+    ),
+  },
+  {
+    id: "04",
+    sourceLine: 2,
+    label: "EXPRESSION GRAMMAR",
+    status: "IN PROGRESS",
+    note: "primary · unary · precedence",
+    title: "Expression parsing starts at the leaves.",
+    output: (
+      <pre className="compiler-tree">{`parse_unary()
+├── operator?  MINUS | NOT
+└── parse_primary()
+    ├── IDENTIFIER(name)
+    ├── STRING("Suraj")
+    └── grouped expression`}</pre>
+    ),
+  },
+  {
+    id: "05",
+    sourceLine: 7,
+    label: "AST + CODEGEN",
+    status: "NEXT",
+    note: "owned nodes · scopes · lowering",
+    title: "The next layer gives the tree meaning.",
+    output: (
+      <div className="compiler-next-state">
+        <span>unique_ptr&lt;Node&gt;</span><i>→</i><span>scope + types</span><i>→</i><span>codegen</span>
+      </div>
+    ),
   },
 ];
 
-function CoreDiagram() {
-  return (
-    <figure
-      className="cpp-diagram"
-      aria-label="C++ at the center of memory, concurrency, and performance engineering"
-    >
-      <div className="cpp-diagram-top">
-        <span>Inside the practice</span>
-        <span>Fig. 03 / C++</span>
-      </div>
-      <svg
-        viewBox="0 0 480 420"
-        className="cpp-circuit"
-        aria-hidden="true"
-        fill="none"
-      >
-        <defs>
-          <linearGradient
-            id="cpp-core-fill"
-            x1="140"
-            y1="100"
-            x2="340"
-            y2="310"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop stopColor="#cfc0ff" />
-            <stop offset="1" stopColor="#9e83ed" />
-          </linearGradient>
-        </defs>
-        <g className="cpp-traces" stroke="currentColor" strokeWidth="1">
-          <path d="M0 94h66l52 52h34M0 210h152M0 328h70l48-52h34M480 94h-66l-52 52h-34M480 210H328M480 328h-70l-48-52h-34" />
-          <path d="M204 0v112M240 0v112M276 0v112M204 308v112M240 308v112M276 308v112" />
-          <rect
-            x="132"
-            y="92"
-            width="216"
-            height="236"
-            rx="2"
-            strokeDasharray="3 7"
-          />
-          {[146, 178, 210, 242, 274].map((y) => (
-            <g key={y}>
-              <path d={`M139 ${y}h18M323 ${y}h18`} strokeWidth="5" />
-            </g>
-          ))}
-        </g>
-        <path
-          d="M172 112h136l20 20v176H152V132Z"
-          fill="url(#cpp-core-fill)"
-          stroke="#7b5bbd"
-        />
-        <path d="M163 144v152h153" stroke="#7658b0" strokeOpacity=".4" />
-        <text
-          x="240"
-          y="229"
-          textAnchor="middle"
-          fill="#35244e"
-          fontSize="69"
-          fontWeight="500"
-          letterSpacing="-7"
-        >
-          C++
-        </text>
-        <text
-          x="240"
-          y="268"
-          textAnchor="middle"
-          fill="#483162"
-          fontFamily="monospace"
-          fontSize="8"
-          letterSpacing="3"
-        >
-          AT THE CORE
-        </text>
-        <circle cx="172" cy="131" r="3" fill="#4f366e" />
-        <g fill="#d6ed9e" stroke="#6c8050">
-          <circle cx="66" cy="94" r="5" />
-          <circle cx="410" cy="328" r="5" />
-        </g>
-        <g fill="#e78d76">
-          <circle cx="414" cy="94" r="4" />
-          <circle cx="70" cy="328" r="4" />
-        </g>
-      </svg>
-      <div className="cpp-memory-strip" aria-hidden="true">
-        {Array.from({ length: 24 }, (_, index) => (
-          <i key={index} />
-        ))}
-      </div>
-      <figcaption>
-        <span>
-          High-level intent.
-          <br />
-          <em>Low-level understanding.</em>
-        </span>
-        <span className="cpp-caption-arrow" aria-hidden="true">
-          ↘
-        </span>
-      </figcaption>
-    </figure>
-  );
-}
-
 export function TechStackSection() {
+  const [active, setActive] = useState(0);
+  const stage = stages[active];
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setActive((index) => (index + 1) % stages.length);
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
-    <section
-      className="toolkit-section cpp-section"
-      aria-labelledby="cpp-heading"
-    >
-      <div className="site-shell">
-        <div className="cpp-heading">
-          <h2 id="cpp-heading">
-            C++ is the core.
-            <br />
-            <em>The details are the craft.</em>
-          </h2>
-        </div>
-        <div className="cpp-workbench">
-          <CoreDiagram />
-          <div className="cpp-disciplines">
-            {disciplines.map((discipline) => (
-              <article className="cpp-discipline" key={discipline.number}>
-                <span className="cpp-discipline-number">
-                  {discipline.number}
-                </span>
-                <div>
-                  <h3>{discipline.title}</h3>
-                  <p>{discipline.copy}</p>
-                  <span className="cpp-discipline-detail">
-                    {discipline.detail}
-                  </span>
-                </div>
-              </article>
+    <div id="compiler" className="compiler-feature scroll-mt-8" aria-label="Sajilo compiler progress">
+        <motion.div
+          className="compiler-lab"
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <div className="compiler-lab-bar">
+            <span><i /> sajilo / parser.cpp</span>
+            <span>automatic trace</span>
+          </div>
+
+          <div className="compiler-lab-body">
+            <div className="compiler-source-pane">
+              <div className="compiler-pane-label"><span>INPUT</span><span>source.sajilo</span></div>
+              <pre aria-label="Example Sajilo source code"><code>
+                <span><b>01</b><em>suru</em>() -&gt; <em>deu</em>(int) &#123;</span>
+                <span><b>02</b>  name = <em>sun</em> &quot;What is your name?&quot;</span>
+                <span><b>03</b>  <em>jaba</em> name == &quot;Suraj&quot; &#123;</span>
+                <span><b>04</b>    <em>bol</em> &quot;Welcome Suraj!&quot;</span>
+                <span><b>05</b>  &#125; <em>natra</em> &#123;</span>
+                <span><b>06</b>    <em>bol</em> &quot;Hello &quot; + name</span>
+                <span><b>07</b>  &#125;</span>
+                <span><b>08</b>  <em>laijau</em> value;</span>
+                <span><b>09</b>&#125;</span>
+              </code></pre>
+              <div
+                className="compiler-cursor-line"
+                style={{ "--line-y": `${6.05 + stage.sourceLine * 2.25}rem` } as CSSProperties}
+              />
+            </div>
+
+            <div className="compiler-transfer" aria-hidden="true">
+              <span>→</span><i />
+            </div>
+
+            <div className="compiler-output-pane">
+              <div className="compiler-pane-label"><span>STAGE {stage.id}</span><span>{stage.status}</span></div>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  className="compiler-stage-output"
+                  key={stage.id}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <p>{stage.title}</p>
+                  {stage.output}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+
+          <div className="compiler-stage-rail" aria-label="Sajilo compiler progress">
+            {stages.map((item, index) => (
+              <div className={index === active ? "is-active" : ""} key={item.id}>
+                <span>{item.id}</span>
+                <strong>{item.label}</strong>
+                <small>{item.status}</small>
+                <em>{item.note}</em>
+                {index === active && <i className="compiler-stage-progress" aria-hidden="true" />}
+              </div>
             ))}
           </div>
-        </div>
-      </div>
-    </section>
+        </motion.div>
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 
 const services = [
   {
+    number: "01",
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -20,11 +21,12 @@ const services = [
       </svg>
     ),
     title: "Build",
-    description: "Robust software that scales.",
+    description: "Robust software with clear ownership.",
     accentClass:
       "absolute left-1/2 bottom-0 h-10 w-12 -translate-x-1/2 rounded-b-full rounded-t-none bg-[#5F66E9]/70 blur-xs opacity-40 transition-all duration-500 group-hover/icon:-translate-y-1",
   },
   {
+    number: "02",
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -40,12 +42,13 @@ const services = [
         <path d="m4.93 4.93 2.83 2.83m8.48 8.48 2.83 2.83m0-14.14-2.83 2.83m-8.48 8.48-2.83 2.83" />
       </svg>
     ),
-    title: "Learn",
-    description: "Low-level concepts, deeply understood.",
+    title: "Understand",
+    description: "Low-level concepts, followed deeply.",
     accentClass:
       "absolute left-1 top-1 h-8 w-6 rounded-full bg-[#06B6D4]/75 blur-xs opacity-45 transition-all duration-500 group-hover/icon:translate-y-1 group-hover/icon:-translate-x-1",
   },
   {
+    number: "03",
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -62,12 +65,13 @@ const services = [
         <path d="M17 17v4m0-18v4" />
       </svg>
     ),
-    title: "Explore",
-    description: "Push boundaries, experiment daily.",
+    title: "Measure",
+    description: "Performance proven with evidence.",
     accentClass:
       "absolute left-1 bottom-1 h-7 w-8 rounded-full bg-[#22C55E]/70 blur-xs opacity-40 transition-all duration-500 group-hover/icon:-translate-y-1 group-hover/icon:translate-x-1",
   },
   {
+    number: "04",
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -83,8 +87,8 @@ const services = [
         <path d="M2 12l10 5 10-5" />
       </svg>
     ),
-    title: "Solve",
-    description: "Real-world problems that matter.",
+    title: "Refine",
+    description: "Complex systems made simple to use.",
     accentClass:
       "absolute right-3 top-4 h-8 w-6 rounded-full bg-[#8B5CF6]/75 blur-xs opacity-45 transition-all duration-500 group-hover/icon:-translate-y-1 group-hover/icon:translate-x-1",
   },
@@ -92,7 +96,7 @@ const services = [
 
 export function WhatIDoSection() {
   return (
-    <section id="what-i-do" className="relative py-28">
+    <section id="what-i-do" className="relative pb-28 pt-12">
       <div className="site-shell">
         <div className="grid items-center gap-16 xl:grid-cols-[.9fr_1.1fr] xl:gap-20">
           {/* Left Side */}
@@ -141,6 +145,9 @@ export function WhatIDoSection() {
                 viewport={{ once: true }}
                 className="group flex flex-col items-center text-center"
               >
+                <span className="mb-2 font-mono text-[8px] tracking-[.12em] text-primary/70">
+                  {service.number}
+                </span>
                 {/* Icon Area */}
                 <div className="relative mb-5 group/icon">
                   {/* Matte Glow */}

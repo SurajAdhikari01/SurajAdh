@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { ArrowUpRight, GitFork, Github, Star } from "lucide-react";
 import type { GitHubShowcase } from "@/lib/github";
+import { TechStackSection } from "@/components/tech-stack-section";
 
 const swatches = [
   "project-indigo",
@@ -40,6 +41,11 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
               </span>
             </h2>
           </div>
+        </div>
+        <TechStackSection />
+        <div className="projects-subhead">
+          <span>Repository index</span>
+          <span>{String(repositories.length).padStart(2, "0")} projects</span>
         </div>
         {!repositories.length && (
           <div className="border-y border-border py-12">

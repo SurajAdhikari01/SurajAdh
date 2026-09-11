@@ -1,39 +1,35 @@
 import { ArrowDown, ArrowUpRight } from "lucide-react";
-import {
-  PortfolioTerminal,
-  type TerminalProject,
-} from "@/components/portfolio-terminal";
+import { KineticSculpture } from "@/components/kinetic-sculpture";
 
-export function HeroSection({ projects }: { projects: TerminalProject[] }) {
+export function HeroSection() {
   return (
-    <section
-      id="home"
-      className="hero-stage hero-clean min-h-screen flex items-center"
-    >
-      <div className="site-shell w-full mx-auto">
-        <div className="hero-clean-layout">
-          <div className="hero-clean-copy">
-            <h1>
-              C++ engineer.
-              <br />
-              <em>Systems thinker.</em>
-            </h1>
+    <section id="home" className="premium-hero">
+      <div className="site-shell">
+        <header className="premium-hero-top">
+          <a href="#home" className="wordmark">Suraj Adhikari<span>C++ / Software engineer</span></a>
+          <span>Based in Kathmandu · Working worldwide</span>
+        </header>
 
-            <p className="hero-clean-description">
-              I’m Suraj. I build dependable software with a focus on C++,
-              memory, and performance.
-            </p>
-
-            <a href="#work" className="hero-primary-link">
-              Explore my work
-              <span>
-                <ArrowDown size={17} />
-              </span>
-            </a>
+        <div className="premium-hero-main">
+          <div className="premium-hero-copy">
+            <p>C++ · Systems · Compiler design</p>
+            <h1>Build deeply.<br /><em>Ship simply.</em></h1>
+            <div className="premium-hero-intro">
+              <p>I turn low-level understanding into software that feels clear, fast, and dependable.</p>
+              <a href="#work">View selected work <span><ArrowDown size={16} /></span></a>
+            </div>
           </div>
 
-          <PortfolioTerminal projects={projects} />
+          <div className="premium-hero-visual">
+            <KineticSculpture />
+          </div>
         </div>
+
+        <footer className="premium-hero-foot">
+          <span>Currently building Sajilo in C++</span>
+          <span>Pull MODE from the corner to enter the CLI</span>
+          <a href="#about">About the engineer <ArrowUpRight size={12} /></a>
+        </footer>
       </div>
     </section>
   );
