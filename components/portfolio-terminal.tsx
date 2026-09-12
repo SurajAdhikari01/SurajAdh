@@ -6,7 +6,7 @@ import { ArrowUpRight, CornerDownLeft, Terminal } from "lucide-react";
 export type TerminalProject = { name: string; url: string; language: string | null };
 type Entry = { id: number; command: string; output: ReactNode };
 const commands = ["help", "ls", "tree", "pwd", "cd", "cat", "project", "open", "status", "history", "theme", "socials", "email", "gui", "exit", "quit", "mode", "whoami", "skills", "projects", "sajilo", "contact", "goto", "copy", "date", "echo", "clear"];
-const destinations: Record<string, string> = { home: "home", about: "about", practice: "about", sajilo: "compiler", work: "work", contact: "contact" };
+const destinations: Record<string, string> = { home: "home", about: "about", practice: "about", sajilo: "compiler", work: "work", projects: "work", contact: "contact" };
 const email = "surajadhikari01@icloud.com";
 
 export function PortfolioTerminal({ projects, autoFocus = false, onNavigate, standalone = false, onExit }: { projects: TerminalProject[]; autoFocus?: boolean; onNavigate?: () => void; standalone?: boolean; onExit?: () => void }) {
@@ -80,7 +80,7 @@ export function PortfolioTerminal({ projects, autoFocus = false, onNavigate, sta
     └── linkedin`}</pre>;
         break;
       case "pwd": output = `/portfolio/${path === "~" ? "" : path.slice(2)}`; break;
-      case "cat": output = sectionOutput(argument.toLowerCase().replace(/^\.\//, "")); break;
+      case "cat": output = sectionOutput((argument || path.split("/").pop() || "home").toLowerCase().replace(/^\.\//, "")); break;
       case "status": output = sectionOutput("sajilo"); break;
       case "history": output = history.current.map((item, index) => `${String(index + 1).padStart(2, "0")}  ${item}`).join("\n"); break;
       case "gui":
@@ -132,6 +132,7 @@ export function PortfolioTerminal({ projects, autoFocus = false, onNavigate, sta
         const requestedTheme = argument.toLowerCase();
         if (requestedTheme !== "light" && requestedTheme !== "dark") { output = "Usage: theme light | theme dark"; break; }
         document.documentElement.classList.toggle("dark", requestedTheme === "dark");
+        document.querySelector(".cli-site-mode")?.classList.toggle("is-light", requestedTheme === "light");
         try { localStorage.setItem("suraj-theme", requestedTheme); } catch { /* Optional persistence. */ }
         output = `Theme set to ${requestedTheme}.`;
         break;
@@ -139,6 +140,11 @@ export function PortfolioTerminal({ projects, autoFocus = false, onNavigate, sta
         break;
       case "cd":
       case "goto": {
+        if (standalone && (argument === ".." || argument === "~" || argument === "/")) {
+          setPath("~");
+          output = "Returned to /portfolio/.";
+          break;
+        }
         const target = destinations[argument.toLowerCase()];
         if (target) {
           if (standalone) {

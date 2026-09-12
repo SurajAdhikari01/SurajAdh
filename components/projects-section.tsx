@@ -43,10 +43,7 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
           </div>
         </div>
         <TechStackSection />
-        <div className="projects-subhead">
-          <span>Repository index</span>
-          <span>{String(repositories.length).padStart(2, "0")} projects</span>
-        </div>
+
         {!repositories.length && (
           <div className="border-y border-border py-12">
             <p className="text-sm text-muted-foreground">
@@ -76,9 +73,7 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
               className={`project-card group ${swatches[index % swatches.length]}`}
             >
               <div className="flex items-start justify-between">
-                <span className="font-mono text-[9px] uppercase tracking-[.16em] opacity-55">
-                  Repository / {String(index + 1).padStart(2, "0")}
-                </span>
+                <span className="font-mono text-[9px] uppercase tracking-[.16em] opacity-55"></span>
                 <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-1 group-hover:translate-x-1" />
               </div>
               <div className="project-mark my-12">

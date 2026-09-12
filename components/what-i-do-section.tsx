@@ -145,9 +145,6 @@ export function WhatIDoSection() {
                 viewport={{ once: true }}
                 className="group flex flex-col items-center text-center"
               >
-                <span className="mb-2 font-mono text-[8px] tracking-[.12em] text-primary/70">
-                  {service.number}
-                </span>
                 {/* Icon Area */}
                 <div className="relative mb-5 group/icon">
                   {/* Matte Glow */}
