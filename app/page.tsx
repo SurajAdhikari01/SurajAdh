@@ -57,7 +57,13 @@ export default async function Home() {
   const terminalProjects = github.repositories.map((repo) => ({
     name: repo.name,
     url: repo.html_url,
+    homepage: repo.homepage,
     language: repo.language,
+    description: repo.description,
+    topics: repo.topics,
+    stars: repo.stargazers_count,
+    forks: repo.forks_count,
+    updatedAt: repo.updated_at,
   }));
   return (
     <div className="relative min-h-screen bg-background">

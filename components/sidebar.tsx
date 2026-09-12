@@ -230,6 +230,10 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
     try { localStorage.setItem("suraj-theme", next ? "dark" : "light"); } catch { /* Keep in-session state. */ }
   };
 
+  const runTerminalCommand = (command: string) => {
+    window.dispatchEvent(new CustomEvent("portfolio-command", { detail: command }));
+  };
+
   return (
     <>
       <motion.button
@@ -373,21 +377,30 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
 
       {(cliMode || cornerPreview?.source === "gui" || peel?.source === "gui") && (
           <main className={`cli-site-mode${!cliMode ? " is-preview" : ""}`}>
-            <header className="cli-mode-header"><span>suraj.dev</span><span>portfolio_cli — C++20</span><span>ONLINE</span></header>
             <div className="cli-mode-layout">
               <aside>
-                <p>QUICK START</p>
-                <code>tree</code><span>map the portfolio</span>
-                <code>cat about</code><span>read the profile</span>
-                <code>cd work</code><span>browse projects</span>
-                <code>project 1</code><span>inspect a repository</span>
-                <code>sajilo</code><span>compiler status</span>
-                <code>theme light|dark</code><span>change appearance</span>
-                <code>exit</code><span>return to GUI</span>
+                <div className="cli-explorer-title"><span>EXPLORER</span><small>portfolio</small></div>
+                <nav aria-label="Terminal sections">
+                  {[
+                    ["~/", "cd home"],
+                    ["about/", "cd about"],
+                    ["skills/", "cd skills"],
+                    ["sajilo/", "cd sajilo"],
+                    ["work/", "cd work"],
+                    ["contact/", "cd contact"],
+                  ].map(([label, command]) => <button key={command} type="button" onClick={() => runTerminalCommand(command)}><span>›</span>{label}</button>)}
+                </nav>
+                <div className="cli-toolbox">
+                  <p>C++ TOOLBOX</p>
+                  <button type="button" onClick={() => runTerminalCommand("cpp --version")}>toolchain</button>
+                  <button type="button" onClick={() => runTerminalCommand("build sajilo")}>build</button>
+                  <button type="button" onClick={() => runTerminalCommand("bench")}>performance</button>
+                  <button type="button" onClick={() => runTerminalCommand("memory")}>ownership</button>
+                </div>
               </aside>
               <PortfolioTerminal projects={projects} autoFocus={cliMode} standalone onExit={() => setMode(false)} />
             </div>
-            <footer className="cli-mode-footer"><span>CTRL + K / SWITCH INTERFACE</span><span>KATHMANDU, NP</span></footer>
+            <footer className="cli-mode-footer"><span>main*</span><span>C++20</span><span>UTF-8</span><span>CTRL + K / SWITCH INTERFACE</span></footer>
           </main>
       )}
     </>
