@@ -41,7 +41,8 @@ export function HeroSection() {
         <div className="hx-stage" ref={stageRef}>
           <HeroTerrain onSun={onSun} />
 
-          <h1 id="hx-title" className="hx-title" aria-label="Engineering from the token up.">
+          <h1 id="hx-title" className="hx-title">
+            <span className="sr-only">Suraj Adhikari, C++ and systems engineer: engineering from the token up.</span>
             {TOKENS.map((token, t) => (
               <span
                 key={t}
@@ -58,7 +59,7 @@ export function HeroSection() {
 
         <div className="hx-foot">
           <p className="hx-intro">
-            C++ and systems engineer, building Sajilo, my own programming language.
+            C++ and systems engineer, building <a className="hx-inline" href="/sajilo">Sajilo</a>, my own programming language.
           </p>
           <div className="hx-links">
             <a href="#work">

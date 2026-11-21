@@ -86,6 +86,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="bg-background" suppressHydrationWarning>
+      <head>
+        {/* Apply the saved theme before first paint, on every page. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('suraj-theme');document.documentElement.classList.toggle('dark',t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches)}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased">
         <MotionPreferences>{children}</MotionPreferences>
         {process.env.NODE_ENV === 'production' && <Analytics />}

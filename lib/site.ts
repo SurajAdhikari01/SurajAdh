@@ -9,4 +9,4 @@ export const siteName = "Suraj Adhikari";
 export const siteTitle =
   "Suraj Adhikari — C++, Systems & Compiler Engineer in Nepal";
 export const siteDescription =
-  "Suraj Adhikari is a C++ and systems engineer in Kathmandu, Nepal, building Sajilo, his own programming language and compiler. Systems programming, networking and performance work, available remotely worldwide.";
+  "Suraj Adhikari is a C++ and systems engineer in Kathmandu, Nepal, building Sajilo, a programming language with Nepali keywords, and its compiler. Systems programming, networking and performance work, available remotely worldwide.";

@@ -449,7 +449,13 @@ void main() {
   colour = colour / (1.0 + colour * 0.3);
   colour = pow(colour, vec3(1.0 / 2.2));
 
-  float fog = clamp(max(smoothstep(2.4, 4.6, vDist) * 0.7, (1.0 - smoothstep(0.0, 0.15, vPos.y)) * 0.8), 0.0, 1.0);
+  // Distance haze, a valley mist that pools low and thins with height, and
+  // the near edge of the range dissolving into the page so it never shows.
+  float far = smoothstep(2.4, 4.6, vDist) * 0.7;
+  float low = 1.0 - smoothstep(0.0, 0.26, vPos.y);
+  float mist = low * low * (3.0 - 2.0 * low);
+  float near = 1.0 - smoothstep(0.0, 0.55, vPos.z);
+  float fog = clamp(max(max(far, mist), near), 0.0, 1.0);
   outColor = vec4(mix(colour, uFog, fog), 1.0);
 }`;
 
@@ -506,7 +512,7 @@ export function HeroTerrain({ onSun }: { onSun?: (sun: Vec3) => void }) {
 
   useEffect(() => {
     const canvas = glRef.current;
-    const gl = canvas?.getContext("webgl2", { antialias: true, alpha: true, premultipliedAlpha: false, powerPreference: "high-performance" });
+    const gl = canvas?.getContext("webgl2", { antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" });
     if (!canvas || !gl) return;
 
     let terrain: WebGLProgram;

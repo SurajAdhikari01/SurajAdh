@@ -45,7 +45,10 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
         )}
 
         <ol className="work-list" aria-label="Projects">
-          {repositories.map((repo, index) => (
+          {repositories.map((repo, index) => {
+            // Sajilo has its own page here; everything else goes to GitHub.
+            const own = repo.name === "sajilo-compiler";
+            return (
               <motion.li
                 key={repo.id}
                 initial={{ opacity: 0, y: 18 }}
@@ -55,9 +58,8 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
               >
                 <a
                   className="work-row"
-                  href={repo.homepage || repo.html_url}
-                  target="_blank"
-                  rel="noreferrer"
+                  href={own ? "/sajilo" : repo.homepage || repo.html_url}
+                  {...(own ? {} : { target: "_blank", rel: "noreferrer" })}
                 >
                   <span className="work-main">
                     <h3 className="work-name">{repo.name.replaceAll("-", " ")}</h3>
@@ -77,7 +79,8 @@ export function ProjectsSection({ github }: { github: GitHubShowcase }) {
                   </span>
                 </a>
               </motion.li>
-          ))}
+            );
+          })}
         </ol>
       </div>
     </section>
