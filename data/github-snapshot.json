@@ -1,0 +1,70 @@
+{
+  "note": "Pinned repositories, shown whenever the GitHub API is unavailable. Refresh by hand when pins change.",
+  "repositories": [
+    {
+      "id": -1,
+      "name": "sajilo-compiler",
+      "description": "Sajilo, my own compiler in C++ built for fun which follows nepali language for variable decleration, calling, return etc",
+      "html_url": "https://github.com/SurajAdhikari01/sajilo-compiler",
+      "homepage": null,
+      "language": "C++",
+      "stargazers_count": 1,
+      "forks_count": 1,
+      "topics": [],
+      "updated_at": "2026-11-20T17:22:57Z",
+      "fork": false
+    },
+    {
+      "id": -2,
+      "name": "DeepNeuralNetwork",
+      "description": "A \"L layer\" generic neural network implemented only using numpy.",
+      "html_url": "https://github.com/SurajAdhikari01/DeepNeuralNetwork",
+      "homepage": null,
+      "language": "Python",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "topics": [],
+      "updated_at": "2026-11-20T17:22:57Z",
+      "fork": false
+    },
+    {
+      "id": -3,
+      "name": "Nepal-Compass",
+      "description": "An IOS application for guiding people through nepal with beautiful ui and theming options",
+      "html_url": "https://github.com/SurajAdhikari01/Nepal-Compass",
+      "homepage": null,
+      "language": "Swift",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "topics": [],
+      "updated_at": "2026-11-20T17:22:57Z",
+      "fork": false
+    },
+    {
+      "id": -4,
+      "name": "Khana",
+      "description": "A site for connection people in need with the people who have access of food",
+      "html_url": "https://github.com/SurajAdhikari01/Khana",
+      "homepage": null,
+      "language": "JavaScript",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "topics": [],
+      "updated_at": "2026-11-20T17:22:57Z",
+      "fork": false
+    },
+    {
+      "id": -5,
+      "name": "BasicTokenizerForLLM",
+      "description": "This is a tiny illustrative implementation of tokinizer for LLM",
+      "html_url": "https://github.com/SurajAdhikari01/BasicTokenizerForLLM",
+      "homepage": null,
+      "language": "Python",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "topics": [],
+      "updated_at": "2026-11-20T17:22:57Z",
+      "fork": false
+    }
+  ]
+}

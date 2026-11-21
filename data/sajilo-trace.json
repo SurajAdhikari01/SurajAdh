@@ -1,0 +1,13 @@
+{
+  "file": "hello.sj",
+  "source": "func main() -> deu(int) {\n  manau string greeting = \"Namaste, World!\";\n  write(greeting, 16);\n  laijau(0);\n}",
+  "tokens": "FUNC\nIDENTIFIER(main)\nLEFT_PAREN\nRIGHT_PAREN\nARROW\nDEU\nLEFT_PAREN\nKEYWORD(int)\nRIGHT_PAREN\nLEFT_BRACE\nMANAU\nKEYWORD(string)\nIDENTIFIER(greeting)\nASSIGN\nSTRING_LITERAL(Namaste, World!)\nSEMICOLON\nWRITE\nLEFT_PAREN\nIDENTIFIER(greeting)\nCOMMA\nINT_LITERAL(16)\nRIGHT_PAREN\nSEMICOLON\nLAIJAU\nLEFT_PAREN\nINT_LITERAL(0)\nRIGHT_PAREN\nSEMICOLON\nRIGHT_BRACE\nEND_OF_FILE",
+  "ast": "Function main() -> int\n├── Manau greeting: string = \"Namaste, World!\"\n├── Write(greeting, 16)\n└── Laijau 0",
+  "semantics": "scope main\n  greeting   string   local\n\nwrite(string, int)   ok\nlaijau(int)          ok\n0 errors",
+  "ir": "str0: \"Namaste, World!\"\n\nmain():\ngreeting = str0\nparam greeting\nparam 16\ncall __sys_write\nreturn 0",
+  "asm": {
+    "status": true,
+    "output": "section .data\n\tstr.0: db \"Namaste, World!\", 0\n\n\nsection .text\nglobal _start\n\n_start:\n\tand rsp, -32\n\tcall main$\n\n\tmov rdi, rax\n\tcall __sys_exit\n\tret\n__sys_exit:\n\tmov rax, 60\n\tsyscall\n\tret\n\n__sys_read:\n\tmov rdx, rsi\n\tmov rsi, rdi\n\tmov rdi, 0\n\tmov rax, 0\n\tsyscall\n\tret\n\n__sys_write:\n\tmov rdx, rsi\n\tmov rsi, rdi\n\tmov rdi, 1\n\tmov rax, 1\n\tsyscall\n\tret\n\n\n\n\nmain$:\npush rbp\nmov rbp, rsp\nsub rsp, 8\nmov qword [rbp - 8], str.0\nmov rdi, qword [rbp - 8]\ncall __sys_write\nleave\nret\n\n",
+    "error": ""
+  }
+}

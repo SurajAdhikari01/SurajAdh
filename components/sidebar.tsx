@@ -71,8 +71,21 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
   const pointerStartRef = useRef<Point | null>(null);
   const lastPointerRef = useRef<Point | null>(null);
   const animationRef = useRef<number | null>(null);
+  const [showHint, setShowHint] = useState(false);
+  const pulledRef = useRef(false);
+  const cancelHintRef = useRef<(() => void) | null>(null);
+
+  // Once someone has pulled the corner, stop hinting at it, immediately and
+  // for good: hide the note and cancel any nudges still queued.
+  const markPulled = () => {
+    pulledRef.current = true;
+    cancelHintRef.current?.();
+    setShowHint(false);
+    try { localStorage.setItem("suraj-pulled", "1"); } catch { /* Optional. */ }
+  };
 
   const setMode = (nextCliMode: boolean) => {
+    markPulled();
     setMenuOpen(false);
     setCornerPreview(foldAt(
       { x: window.innerWidth - 38, y: 38 },
@@ -181,6 +194,37 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
     };
   }, [cliMode]);
 
+  // The note beside the corner shows on every visit while the page is at the
+  // top, until the corner is pulled. The peel nudges are for first visits only.
+  useEffect(() => {
+    if (cliMode || pulledRef.current) return;
+    let seen = false;
+    try { seen = !!localStorage.getItem("suraj-pulled"); } catch { /* Treat as new. */ }
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const scrollRoot = document.querySelector<HTMLElement>(".site-main");
+    const atTop = () => (scrollRoot?.scrollTop ?? 0) < 60;
+    const timers: number[] = [];
+    cancelHintRef.current = () => timers.forEach((id) => window.clearTimeout(id));
+    const rest = () => setCornerPreview(foldAt({ x: window.innerWidth - 38, y: 38 }, "gui"));
+    const nudge = () => {
+      if (seen || pulledRef.current || pointerStartRef.current || !atTop() || reduce) return;
+      setCornerPreview(foldAt({ x: window.innerWidth - 96, y: 96 }, "gui"));
+      timers.push(window.setTimeout(rest, 700));
+    };
+    timers.push(window.setTimeout(() => { if (!pulledRef.current) setShowHint(atTop()); }, 1200));
+    timers.push(window.setTimeout(nudge, 2200));
+    timers.push(window.setTimeout(nudge, 7200));
+    timers.push(window.setTimeout(nudge, 13200));
+    const onScroll = () => setShowHint(!pulledRef.current && atTop());
+    scrollRoot?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      cancelHintRef.current = null;
+      scrollRoot?.removeEventListener("scroll", onScroll);
+      setShowHint(false);
+    };
+  }, [cliMode]);
+
   const animateFold = (from: Point, to: Point, source: "gui" | "cli", complete: boolean) => {
     if (animationRef.current) window.cancelAnimationFrame(animationRef.current);
     const started = performance.now();
@@ -197,14 +241,17 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
     animationRef.current = window.requestAnimationFrame(frame);
   };
 
-  const releaseFold = (current: Point, cancelled = false) => {
+  // A pull commits once it clears a small distance from the corner, however
+  // the gesture ends: release, cancel or lost capture. Browsers can cancel a
+  // real mouse drag (native drag or selection), which used to snap it back.
+  const releaseFold = (current: Point) => {
     const start = pointerStartRef.current;
     if (!start) return;
     pointerStartRef.current = null;
     lastPointerRef.current = null;
     const gestureDistance = Math.hypot(current.x - start.x, current.y - start.y);
     const cornerDistance = Math.hypot(window.innerWidth - current.x, current.y);
-    const completes = !cancelled && (gestureDistance < 8 || cornerDistance > Math.max(64, Math.min(window.innerWidth, window.innerHeight) * .12));
+    const completes = gestureDistance < 8 || cornerDistance > Math.max(56, Math.min(window.innerWidth, window.innerHeight) * .07);
     const diagonal = Math.hypot(window.innerWidth, window.innerHeight);
     animateFold(
       current,
@@ -230,9 +277,6 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
     try { localStorage.setItem("suraj-theme", next ? "dark" : "light"); } catch { /* Keep in-session state. */ }
   };
 
-  const runTerminalCommand = (command: string) => {
-    window.dispatchEvent(new CustomEvent("portfolio-command", { detail: command }));
-  };
 
   return (
     <>
@@ -243,6 +287,7 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
         aria-label={cliMode ? "Pull to switch to the graphical portfolio" : "Pull to switch to the command-line portfolio"}
         title={`Pull or click for ${cliMode ? "GUI" : "CLI"}`}
         onPointerEnter={() => {
+          setShowHint(false);
           if (!pointerStartRef.current) setCornerPreview(foldAt(
             { x: window.innerWidth - 118, y: 118 },
             cliMode ? "cli" : "gui",
@@ -255,6 +300,7 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
           ));
         }}
         onPointerDown={(event) => {
+          markPulled();
           if (animationRef.current) window.cancelAnimationFrame(animationRef.current);
           event.currentTarget.setPointerCapture(event.pointerId);
           pointerStartRef.current = { x: event.clientX, y: event.clientY };
@@ -271,13 +317,35 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
         onPointerUp={(event) => {
           releaseFold({ x: event.clientX, y: event.clientY });
         }}
-        onPointerCancel={() => releaseFold(lastPointerRef.current ?? { x: window.innerWidth - 1, y: 1 }, true)}
-        onLostPointerCapture={() => {
-          if (pointerStartRef.current) releaseFold(lastPointerRef.current ?? pointerStartRef.current, true);
+        onPointerCancel={() => {
+          if (pointerStartRef.current) releaseFold(lastPointerRef.current ?? pointerStartRef.current);
         }}
+        onLostPointerCapture={() => {
+          if (pointerStartRef.current) releaseFold(lastPointerRef.current ?? pointerStartRef.current);
+        }}
+        onDragStart={(event) => event.preventDefault()}
       >
         <span className="fold-hit-area" aria-hidden="true" />
       </motion.button>
+
+      <AnimatePresence>
+        {showHint && !cliMode && (
+          <motion.p
+            className="pull-hint"
+            aria-hidden="true"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: .5, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <svg viewBox="0 0 60 44" aria-hidden="true">
+              <path d="M4 40 C 22 38, 40 30, 50 8" />
+              <path d="M42 11 L 50 7 L 53 16" />
+            </svg>
+            Pull for the terminal
+          </motion.p>
+        )}
+      </AnimatePresence>
 
       {(peel ?? cornerPreview) && (
         <div
@@ -377,30 +445,7 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
 
       {(cliMode || cornerPreview?.source === "gui" || peel?.source === "gui") && (
           <main className={`cli-site-mode${!cliMode ? " is-preview" : ""}`}>
-            <div className="cli-mode-layout">
-              <aside>
-                <div className="cli-explorer-title"><span>EXPLORER</span><small>portfolio</small></div>
-                <nav aria-label="Terminal sections">
-                  {[
-                    ["~/", "cd home"],
-                    ["about/", "cd about"],
-                    ["skills/", "cd skills"],
-                    ["sajilo/", "cd sajilo"],
-                    ["work/", "cd work"],
-                    ["contact/", "cd contact"],
-                  ].map(([label, command]) => <button key={command} type="button" onClick={() => runTerminalCommand(command)}><span>›</span>{label}</button>)}
-                </nav>
-                <div className="cli-toolbox">
-                  <p>C++ TOOLBOX</p>
-                  <button type="button" onClick={() => runTerminalCommand("cpp --version")}>toolchain</button>
-                  <button type="button" onClick={() => runTerminalCommand("build sajilo")}>build</button>
-                  <button type="button" onClick={() => runTerminalCommand("bench")}>performance</button>
-                  <button type="button" onClick={() => runTerminalCommand("memory")}>ownership</button>
-                </div>
-              </aside>
-              <PortfolioTerminal projects={projects} autoFocus={cliMode} standalone onExit={() => setMode(false)} />
-            </div>
-            <footer className="cli-mode-footer"><span>main*</span><span>C++20</span><span>UTF-8</span><span>CTRL + K / SWITCH INTERFACE</span></footer>
+            <PortfolioTerminal projects={projects} autoFocus={cliMode} onExit={() => setMode(false)} />
           </main>
       )}
     </>

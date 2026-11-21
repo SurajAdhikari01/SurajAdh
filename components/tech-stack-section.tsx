@@ -1,168 +1,178 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { ArrowUpRight } from "lucide-react";
+import trace from "@/data/sajilo-trace.json";
+import { highlightLines, parseTokens, tokenClass } from "@/lib/sajilo-highlight";
+import type { Lang, Token } from "@/lib/sajilo-highlight";
 
-const stages = [
-  {
-    id: "01",
-    sourceLine: 0,
-    label: "TOKENIZATION",
-    status: "IMPLEMENTED",
-    note: "keywords · operators · literals",
-    title: "The lexer classifies the source.",
-    output: (
-      <div className="compiler-token-stream">
-        <span data-kind="keyword">KW_SURU</span>
-        <span>TK_LPAREN</span><span>TK_RPAREN</span><span>TK_ARROW</span>
-        <span data-kind="keyword">KW_DEU</span><span>TYPE_INT</span>
-        <span data-kind="identifier">IDENTIFIER(name)</span>
-        <span data-kind="keyword">KW_SUN</span>
-        <span data-kind="keyword">KW_JABA</span>
-        <span>OP_EQUAL_EQUAL</span>
-      </div>
-    ),
-  },
-  {
-    id: "02",
-    sourceLine: 2,
-    label: "PARSER CORE",
-    status: "IMPLEMENTED",
-    note: "lookahead · match · expect",
-    title: "A token cursor drives recursive descent.",
-    output: (
-      <pre className="compiler-code-output">{`current_token()
-  └── check(TokenType::JABA)
-        ├── match(...)
-        ├── advance()
-        └── parse_statement()`}</pre>
-    ),
-  },
-  {
-    id: "03",
-    sourceLine: 0,
-    label: "FUNCTION GRAMMAR",
-    status: "IMPLEMENTED",
-    note: "signature · return type · body",
-    title: "The function grammar is now recognized.",
-    output: (
-      <pre className="compiler-tree">{`function_decl
-  ::= SURU "(" params? ")"
-      "->" DEU "(" type ")"
-      block`}</pre>
-    ),
-  },
-  {
-    id: "04",
-    sourceLine: 2,
-    label: "EXPRESSION GRAMMAR",
-    status: "IN PROGRESS",
-    note: "primary · unary · precedence",
-    title: "Expression parsing starts at the leaves.",
-    output: (
-      <pre className="compiler-tree">{`parse_unary()
-├── operator?  MINUS | NOT
-└── parse_primary()
-    ├── IDENTIFIER(name)
-    ├── STRING("Suraj")
-    └── grouped expression`}</pre>
-    ),
-  },
-  {
-    id: "05",
-    sourceLine: 7,
-    label: "AST + CODEGEN",
-    status: "NEXT",
-    note: "owned nodes · scopes · lowering",
-    title: "The next layer gives the tree meaning.",
-    output: (
-      <div className="compiler-next-state">
-        <span>unique_ptr&lt;Node&gt;</span><i>→</i><span>scope + types</span><i>→</i><span>codegen</span>
-      </div>
-    ),
-  },
+/*
+ * One Sajilo program, followed through every stage of the compiler. All
+ * compiler output lives in data/sajilo-trace.json, exactly as the compiler
+ * prints it; this file only decides how each stage is framed and lit.
+ *
+ * Each stage in the JSON may be a raw string, or the compiler's own JSON
+ * envelope: { "status": bool, "output": string, "error": string }. Tokens
+ * may also be an array of { "type", "value" }.
+ */
+
+const REPO = "https://github.com/SurajAdhikari01/sajilo-compiler";
+
+type Envelope = { status: boolean; output: string; error?: string };
+type StageData = string | Envelope | Token[];
+type Trace = { file: string; source: string } & Record<StageKey, StageData>;
+type StageKey = "tokens" | "ast" | "semantics" | "ir" | "asm";
+
+const data = trace as Trace;
+
+type Stage = {
+  key: StageKey;
+  name: string;
+  title: string;
+  lang: Lang;
+  /** Start the excerpt at the first line matching this, e.g. the user's code. */
+  focus?: RegExp;
+};
+
+const stages: Stage[] = [
+  { key: "tokens", name: "Lexer", title: "Characters become tokens.", lang: "tokens" },
+  { key: "ast", name: "Parser", title: "A Pratt parser builds the tree.", lang: "tree" },
+  { key: "semantics", name: "Semantics", title: "Names resolved, types checked.", lang: "tree" },
+  { key: "ir", name: "IR", title: "Lowered to three-address code.", lang: "ir" },
+  { key: "asm", name: "Codegen", title: "x86-64, straight to Linux syscalls.", lang: "asm", focus: /^main\$:/ },
 ];
+
+const MAX_LINES = 13;
+
+function unwrap(value: StageData): { text: string | Token[]; error?: string } {
+  if (Array.isArray(value) || typeof value === "string") return { text: value };
+  if (!value.status) return { text: "", error: value.error || "Compilation failed." };
+  return { text: value.output };
+}
+
+// Keeps the panel a fixed size: start at the interesting part, trim the rest.
+function excerpt(text: string, focus?: RegExp) {
+  let lines = text.replace(/\t/g, "  ").split("\n");
+  if (focus) {
+    const at = lines.findIndex((l) => focus.test(l));
+    if (at > 0) lines = lines.slice(at);
+  }
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const cut = lines.length > MAX_LINES;
+  return { text: lines.slice(0, MAX_LINES).join("\n"), cut };
+}
+
+function StageOutput({ stage }: { stage: Stage }) {
+  const { text, error } = unwrap(data[stage.key]);
+  if (error) return <pre className="sj-code"><span className="hl-err">{error}</span></pre>;
+
+  if (stage.lang === "tokens") {
+    return (
+      <p className="sj-tokens">
+        {parseTokens(text).map((t, i) => (
+          <span key={i}>
+            <span className={tokenClass(t.type)}>{t.type}</span>
+            {t.value !== undefined && <span className="hl-dim">({t.value})</span>}
+          </span>
+        ))}
+      </p>
+    );
+  }
+
+  const { text: shown, cut } = excerpt(text as string, stage.focus);
+  return (
+    <pre className="sj-code">
+      {highlightLines(stage.lang, shown).map((line, i) => {
+        const raw = shown.split("\n")[i] ?? "";
+        // Assembly reads by its labels: indent instructions beneath them.
+        const indent = stage.lang === "asm" && raw.trim() && !/:\s*$/.test(raw) && !/^\s*(section|global)\b/.test(raw);
+        return (
+          <span key={i} className={indent ? "sj-line sj-indent" : "sj-line"}>{line}</span>
+        );
+      })}
+      {cut && <span className="hl-dim">…</span>}
+    </pre>
+  );
+}
+
+const sourceLines = highlightLines("sajilo", data.source);
 
 export function TechStackSection() {
   const [active, setActive] = useState(0);
+  const [paused, setPaused] = useState(false);
   const stage = stages[active];
 
+  // Plays through the stages until someone takes over.
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setActive((index) => (index + 1) % stages.length);
-    }, 3000);
-    return () => window.clearInterval(interval);
-  }, []);
+    if (paused) return;
+    const id = window.setInterval(() => setActive((i) => (i + 1) % stages.length), 4500);
+    return () => window.clearInterval(id);
+  }, [paused]);
 
   return (
-    <div id="compiler" className="compiler-feature scroll-mt-8" aria-label="Sajilo compiler progress">
-        <motion.div
-          className="compiler-lab"
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <div className="compiler-lab-bar">
-            <span><i /> sajilo / parser.cpp</span>
-            <span>automatic trace</span>
-          </div>
-
-          <div className="compiler-lab-body">
-            <div className="compiler-source-pane">
-              <div className="compiler-pane-label"><span>INPUT</span><span>source.sajilo</span></div>
-              <pre aria-label="Example Sajilo source code"><code>
-                <span><b>01</b><em>suru</em>() -&gt; <em>deu</em>(int) &#123;</span>
-                <span><b>02</b>  name = <em>sun</em> &quot;What is your name?&quot;</span>
-                <span><b>03</b>  <em>jaba</em> name == &quot;Suraj&quot; &#123;</span>
-                <span><b>04</b>    <em>bol</em> &quot;Welcome Suraj!&quot;</span>
-                <span><b>05</b>  &#125; <em>natra</em> &#123;</span>
-                <span><b>06</b>    <em>bol</em> &quot;Hello &quot; + name</span>
-                <span><b>07</b>  &#125;</span>
-                <span><b>08</b>  <em>laijau</em> value;</span>
-                <span><b>09</b>&#125;</span>
-              </code></pre>
-              <div
-                className="compiler-cursor-line"
-                style={{ "--line-y": `${6.05 + stage.sourceLine * 2.25}rem` } as CSSProperties}
-              />
-            </div>
-
-            <div className="compiler-transfer" aria-hidden="true">
-              <span>→</span><i />
-            </div>
-
-            <div className="compiler-output-pane">
-              <div className="compiler-pane-label"><span>STAGE {stage.id}</span><span>{stage.status}</span></div>
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  className="compiler-stage-output"
-                  key={stage.id}
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -12 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <p>{stage.title}</p>
-                  {stage.output}
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          </div>
-
-          <div className="compiler-stage-rail" aria-label="Sajilo compiler progress">
+    <div id="compiler" className="scroll-mt-8">
+      <motion.div
+        className="sj"
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-80px" }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        onPointerEnter={() => setPaused(true)}
+        onPointerLeave={() => setPaused(false)}
+      >
+        <div className="sj-head">
+          <div className="sj-tabs" role="tablist" aria-label="Sajilo compiler stages">
             {stages.map((item, index) => (
-              <div className={index === active ? "is-active" : ""} key={item.id}>
-                <span>{item.id}</span>
-                <strong>{item.label}</strong>
-                <small>{item.status}</small>
-                <em>{item.note}</em>
-                {index === active && <i className="compiler-stage-progress" aria-hidden="true" />}
-              </div>
+              <button
+                type="button"
+                role="tab"
+                key={item.key}
+                aria-selected={index === active}
+                className={index === active ? "is-active" : undefined}
+                onClick={() => {
+                  setActive(index);
+                  setPaused(true);
+                }}
+              >
+                {item.name}
+                {index === active && !paused && <i aria-hidden="true" />}
+              </button>
             ))}
           </div>
-        </motion.div>
+          <a className="sj-repo" href={REPO} target="_blank" rel="noreferrer">
+            Source <ArrowUpRight aria-hidden="true" />
+          </a>
+        </div>
+
+        <div className="sj-body">
+          <div className="sj-source">
+            <p className="sj-file">{data.file}</p>
+            <pre aria-label="Example Sajilo program"><code>
+              {sourceLines.map((line, i) => (
+                <span key={i}>
+                  <b>{i + 1}</b>{line}
+                </span>
+              ))}
+            </code></pre>
+          </div>
+
+          <div className="sj-output" aria-live="polite">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={stage.key}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25 }}
+              >
+                <p className="sj-title">{stage.title}</p>
+                <StageOutput stage={stage} />
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

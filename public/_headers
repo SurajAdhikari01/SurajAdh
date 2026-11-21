@@ -1,0 +1,6 @@
+# Cloudflare Pages: the generated share images are exported without an
+# extension, so declare their type for crawlers.
+/opengraph-image
+  Content-Type: image/png
+/twitter-image
+  Content-Type: image/png

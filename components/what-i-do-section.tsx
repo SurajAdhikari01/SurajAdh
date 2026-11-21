@@ -1,202 +1,111 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { motion } from "framer-motion";
+import { SectionLabel } from "@/components/section-label";
 
+/*
+ * Four verbs, each with a small line drawing that acts it out on hover:
+ * blocks stack, a tree branches, bars settle into a profile, a noisy signal
+ * smooths into a curve. One stroke weight, one colour, no ornament.
+ */
+
+function BuildMark() {
+  return (
+    <svg viewBox="0 0 120 80" aria-hidden="true" className="wid-mark wid-build">
+      <rect x="18" y="52" width="84" height="16" rx="2" />
+      <rect x="30" y="34" width="60" height="16" rx="2" />
+      <rect x="44" y="16" width="32" height="16" rx="2" />
+    </svg>
+  );
+}
+
+function UnderstandMark() {
+  return (
+    <svg viewBox="0 0 120 80" aria-hidden="true" className="wid-mark wid-tree">
+      <path d="M60 12v18M60 30 32 48M60 30l28 18M32 48l-12 18M32 48l12 18M88 48v18" />
+      <circle cx="60" cy="12" r="3.5" />
+      <circle cx="32" cy="48" r="3" />
+      <circle cx="88" cy="48" r="3" />
+      <circle cx="20" cy="66" r="2.5" />
+      <circle cx="44" cy="66" r="2.5" />
+      <circle cx="88" cy="66" r="2.5" />
+    </svg>
+  );
+}
+
+function MeasureMark() {
+  const bars = [22, 38, 30, 54, 46, 62, 40, 26];
+  return (
+    <svg viewBox="0 0 120 80" aria-hidden="true" className="wid-mark wid-bars">
+      <path d="M10 70h100" />
+      {bars.map((h, i) => (
+        <line key={i} x1={18 + i * 12} x2={18 + i * 12} y1={70} y2={70 - h} style={{ "--i": i } as CSSProperties} />
+      ))}
+    </svg>
+  );
+}
+
+function RefineMark() {
+  return (
+    <svg viewBox="0 0 120 80" aria-hidden="true" className="wid-mark wid-refine">
+      <path className="wid-noisy" d="M8 52l8-14 7 20 8-26 7 22 8-16 8 18 7-24 8 20 8-12 7 16 8-20 8 14 8-6" />
+      <path className="wid-smooth" d="M8 50C30 50 34 28 60 28S92 50 112 46" />
+    </svg>
+  );
+}
+
+// Each verb carries its own glow: a soft, matte bloom behind the drawing.
 const services = [
-  {
-    number: "01",
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-6 w-6 transition-all duration-300"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M3 9h18" />
-        <path d="M9 21V9" />
-      </svg>
-    ),
-    title: "Build",
-    description: "Robust software with clear ownership.",
-    accentClass:
-      "absolute left-1/2 bottom-0 h-10 w-12 -translate-x-1/2 rounded-b-full rounded-t-none bg-[#5F66E9]/70 blur-xs opacity-40 transition-all duration-500 group-hover/icon:-translate-y-1",
-  },
-  {
-    number: "02",
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-6 w-6 transition-all duration-300"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
-        <path d="m4.93 4.93 2.83 2.83m8.48 8.48 2.83 2.83m0-14.14-2.83 2.83m-8.48 8.48-2.83 2.83" />
-      </svg>
-    ),
-    title: "Understand",
-    description: "Low-level concepts, followed deeply.",
-    accentClass:
-      "absolute left-1 top-1 h-8 w-6 rounded-full bg-[#06B6D4]/75 blur-xs opacity-45 transition-all duration-500 group-hover/icon:translate-y-1 group-hover/icon:-translate-x-1",
-  },
-  {
-    number: "03",
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-6 w-6 transition-all duration-300"
-      >
-        <path d="M2 12l5 5 5-5-5-5-5 5z" />
-        <path d="M7 17v4m0-18v4" />
-        <path d="M12 12l5 5 5-5-5-5-5 5z" />
-        <path d="M17 17v4m0-18v4" />
-      </svg>
-    ),
-    title: "Measure",
-    description: "Performance proven with evidence.",
-    accentClass:
-      "absolute left-1 bottom-1 h-7 w-8 rounded-full bg-[#22C55E]/70 blur-xs opacity-40 transition-all duration-500 group-hover/icon:-translate-y-1 group-hover/icon:translate-x-1",
-  },
-  {
-    number: "04",
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-6 w-6 transition-all duration-300"
-      >
-        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-        <path d="M2 17l10 5 10-5" />
-        <path d="M2 12l10 5 10-5" />
-      </svg>
-    ),
-    title: "Refine",
-    description: "Complex systems made simple to use.",
-    accentClass:
-      "absolute right-3 top-4 h-8 w-6 rounded-full bg-[#8B5CF6]/75 blur-xs opacity-45 transition-all duration-500 group-hover/icon:-translate-y-1 group-hover/icon:translate-x-1",
-  },
+  { title: "Build", description: "Robust software with clear ownership.", Mark: BuildMark, glow: "var(--primary)", accent: "#8b5cf6" },
+  { title: "Understand", description: "Low-level concepts, followed all the way down.", Mark: UnderstandMark, glow: "#06b6d4", accent: "var(--primary)" },
+  { title: "Measure", description: "Performance proven with evidence, not hunches.", Mark: MeasureMark, glow: "#22c55e", accent: "#06b6d4" },
+  { title: "Refine", description: "Complex systems made simple to use.", Mark: RefineMark, glow: "#8b5cf6", accent: "var(--coral)" },
 ];
 
 export function WhatIDoSection() {
   return (
-    <section id="what-i-do" className="relative pb-28 pt-12">
+    <section id="what-i-do" className="relative pb-28 pt-20 sm:pb-36 sm:pt-28" aria-labelledby="what-i-do-heading">
       <div className="site-shell">
-        <div className="grid items-center gap-16 xl:grid-cols-[.9fr_1.1fr] xl:gap-20">
-          {/* Left Side */}
-          <motion.div
-            initial={{ opacity: 0, x: -30 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.7 }}
-            viewport={{ once: true }}
-            className="space-y-6"
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7 }}
+          viewport={{ once: true }}
+          className="mb-14 space-y-6"
+        >
+          <SectionLabel name="What I do" />
+          <h2
+            id="what-i-do-heading"
+            className="text-balance text-4xl font-medium leading-[1.02] tracking-[-.05em] text-foreground md:text-5xl lg:text-[3.6rem]"
           >
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              What I do
-            </p>
+            Where performance
+            <br />
+            meets <span className="accent-serif">precision.</span>
+          </h2>
+        </motion.div>
 
-            <h2 className="text-balance text-4xl font-light leading-tight tracking-tight text-foreground md:text-5xl lg:text-[3.35rem]">
-              Where <span className="font-medium">Performance</span>
-              <br />
-              meets{" "}
-              <span className="relative font-medium text-[#5F66E9]">
-                Precision.
-                <motion.span
-                  initial={{ width: 0 }}
-                  whileInView={{ width: "100%" }}
-                  transition={{ delay: 0.45, duration: 0.5 }}
-                  viewport={{ once: true }}
-                  className="absolute -bottom-1 left-0 h-0.5 bg-[#5F66E9]/25"
-                />
+        <ol className="wid-grid">
+          {services.map(({ title, description, Mark, glow, accent }, index) => (
+            <motion.li
+              key={title}
+              initial={{ opacity: 0, y: 18 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1, duration: 0.55 }}
+              viewport={{ once: true, margin: "-40px" }}
+              className="wid-item"
+              tabIndex={0}
+              style={{ "--glow": glow, "--accent": accent } as CSSProperties}
+            >
+              <span className="wid-art">
+                <span className="wid-glow" aria-hidden="true" />
+                <Mark />
               </span>
-            </h2>
-          </motion.div>
-
-          {/* Right Side */}
-          <motion.div
-            initial={{ opacity: 0, x: 30 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.7, delay: 0.15 }}
-            viewport={{ once: true }}
-            className="grid grid-cols-2 gap-x-8 gap-y-12 sm:grid-cols-4 sm:gap-x-10"
-          >
-            {services.map((service, index) => (
-              <motion.div
-                key={service.title}
-                initial={{ opacity: 0, y: 18 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.12, duration: 0.5 }}
-                viewport={{ once: true }}
-                className="group flex flex-col items-center text-center"
-              >
-                {/* Icon Area */}
-                <div className="relative mb-5 group/icon">
-                  {/* Matte Glow */}
-                  <div
-                    className="
-                      absolute left-3 top-3
-                      h-14 w-14 rounded-full
-                      bg-[#5F66E9]/18
-                      blur-xl
-                      transition-all duration-500
-                      group-hover/icon:scale-125
-                      group-hover/icon:bg-[#5F66E9]/30
-                    "
-                  />
-
-                  {/* Small Floating Accent */}
-                  <div className={service.accentClass} />
-
-                  {/* Icon */}
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    transition={{
-                      type: "spring",
-                      stiffness: 400,
-                      damping: 22,
-                    }}
-                    className="
-                      relative z-10
-                      flex h-16 w-16 items-center justify-center
-                      
-                      text-foreground/80
-                      transition-all duration-300
-                      group-hover/icon:scale-[1.03]
-                      group-hover/icon:text-[#5F66E9]
-                    "
-                  >
-                    {service.icon}
-                  </motion.div>
-                </div>
-
-                {/* Text */}
-                <h3 className="mb-2 text-sm font-semibold tracking-wide text-foreground">
-                  {service.title}
-                </h3>
-
-                <p className="max-w-35 text-xs leading-relaxed text-muted-foreground">
-                  {service.description}
-                </p>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
+              <h3>{title}</h3>
+              <p>{description}</p>
+            </motion.li>
+          ))}
+        </ol>
       </div>
     </section>
   );

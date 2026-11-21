@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowUpRight, ArrowUp, Check, Copy } from "lucide-react";
+import { ArrowUpRight, Check, Copy } from "lucide-react";
+import { SectionLabel } from "@/components/section-label";
 
 export function ContactSection() {
   const [copyState, setCopyState] = useState("Copy email");
@@ -25,9 +26,9 @@ export function ContactSection() {
   return (
     <section id="contact" className="contact-section">
       <div className="site-shell">
+        <SectionLabel name="Contact" className="contact-label" />
         <div className="contact-heading">
           <div>
-            <p>Have something good in mind?</p>
             <h2>
               Make it
               <br />
@@ -44,11 +45,6 @@ export function ContactSection() {
           </a>
         </div>
         <div className="contact-bottom">
-          <p>
-            Thoughtful projects. Interesting problems.
-            <br />
-            People who care about what they make.
-          </p>
           <div className="contact-email">
             <a href="mailto:surajadhikari01@icloud.com">
               surajadhikari01@icloud.com
@@ -83,9 +79,6 @@ export function ContactSection() {
               LinkedIn <ArrowUpRight size={13} />
             </a>
           </div>
-          <a href="#home">
-            Back to the beginning <ArrowUp size={14} />
-          </a>
         </footer>
       </div>
     </section>

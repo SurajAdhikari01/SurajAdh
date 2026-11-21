@@ -1,4 +1,5 @@
 import "server-only";
+import snapshot from "@/data/github-snapshot.json";
 
 export type GitHubRepository = {
   id: number;
@@ -35,8 +36,9 @@ const FALLBACK: GitHubShowcase = {
     public_repos: 0,
     followers: 0,
   },
-  repositories: [],
-  totalStars: 0,
+  // Never show an empty list: fall back to the saved pinned repositories.
+  repositories: snapshot.repositories as GitHubRepository[],
+  totalStars: snapshot.repositories.reduce((total, repo) => total + repo.stargazers_count, 0),
   fetchedAt: new Date(0).toISOString(),
 };
 
@@ -54,13 +56,15 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
     const [profileResponse, reposResponse, profilePageResponse] = await Promise.all([
       fetch(`https://api.github.com/users/${username}`, {
         headers,
+        next: { revalidate: 3600 },
       }),
       fetch(
         `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
-        { headers },
+        { headers, next: { revalidate: 3600 } },
       ),
       fetch(`https://github.com/${username}`, {
         headers: { "User-Agent": "SurajAdhikari-Portfolio/1.0" },
+        next: { revalidate: 3600 },
       }),
     ]);
 
@@ -104,7 +108,8 @@ export async function getGitHubShowcase(): Promise<GitHubShowcase> {
       fetchedAt: new Date().toISOString(),
     };
   } catch (error) {
-    console.error("GitHub showcase refresh failed:", error);
+    // Expected without GITHUB_TOKEN once the hourly limit runs out.
+    console.warn("GitHub showcase: using saved snapshot.", (error as Error).message);
     return {
       ...FALLBACK,
       profile: { ...FALLBACK.profile, login: username, html_url: `https://github.com/${username}` },

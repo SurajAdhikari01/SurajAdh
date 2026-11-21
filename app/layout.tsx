@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Analytics } from '@vercel/analytics/next'
 import { siteDescription, siteName, siteTitle, siteUrl } from '@/lib/site'
 import './globals.css'
@@ -15,6 +15,9 @@ export const metadata: Metadata = {
   category: 'technology',
   keywords: [
     'software engineer Nepal',
+    'compiler engineer',
+    'Sajilo programming language',
+    'C++ compiler',
     'C++ developer Nepal',
     'C++ systems engineer',
     'systems programming',
@@ -32,20 +35,11 @@ export const metadata: Metadata = {
     description: siteDescription,
     siteName,
     locale: 'en_US',
-    images: [
-      {
-        url: '/hero.png',
-        width: 954,
-        height: 954,
-        alt: 'Suraj Adhikari, C++ and software engineer from Nepal',
-      },
-    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: siteTitle,
     description: siteDescription,
-    images: ['/hero.png'],
   },
   robots: {
     index: true,
@@ -75,6 +69,14 @@ export const metadata: Metadata = {
     ],
     apple: '/apple-icon.png',
   },
+}
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f7f5ef' },
+    { media: '(prefers-color-scheme: dark)', color: '#1b1c20' },
+  ],
+  colorScheme: 'dark light',
 }
 
 export default function RootLayout({
