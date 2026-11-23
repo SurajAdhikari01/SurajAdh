@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, Sun } from "lucide-react";
+import Link from "next/link";
+import { Mountain, Moon, Sun } from "lucide-react";
 import { PortfolioTerminal, type TerminalProject } from "@/components/portfolio-terminal";
 
 type Point = { x: number; y: number };
@@ -358,6 +359,9 @@ export function Sidebar({ projects }: { projects: TerminalProject[] }) {
       {(!cliMode || peel?.source === "cli") && (
         <div className="gui-chrome-layer">
           <div className="site-controls">
+            <Link href="/explore" className="control-button explore-control" aria-label="Explore the portfolio in 3D">
+              <Mountain size={16} aria-hidden="true" /><span>3D</span>
+            </Link>
             <button type="button" className="control-button theme-control" onClick={toggleTheme} aria-label={isDark ? "Use light theme" : "Use dark theme"}>
               {isDark ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
             </button>

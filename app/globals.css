@@ -245,6 +245,7 @@
 .control-button { display: grid; width: 42px; place-items: center; border-radius: 50%; }
 .console-pull:hover, .control-button:hover { transform: translateY(2px); border-color: color-mix(in oklab, var(--primary) 55%, var(--border)); background: var(--background); }
 .theme-control { margin-right: 4px; }
+.explore-control { display: flex; width: auto; gap: .4rem; padding-inline: .85rem; border-radius: 99px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; }
 .menu-control { display: flex; width: 86px; padding-inline: .85rem; grid-auto-flow: column; gap: .55rem; border-radius: 99px; font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
 .menu-control-label { position: relative; display: grid; min-width: 30px; overflow: hidden; place-items: center; }
 .menu-control-label > span { grid-area: 1 / 1; }

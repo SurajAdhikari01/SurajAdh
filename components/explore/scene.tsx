@@ -1,0 +1,1613 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Line, Sky, Stars } from "@react-three/drei";
+import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { BlendFunction } from "postprocessing";
+import * as THREE from "three";
+import { ImprovedNoise } from "three/examples/jsm/math/ImprovedNoise.js";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import {
+  ARCH,
+  CHAPTERS,
+  STOP_SHOTS,
+  SUN,
+  WATER,
+  WORLD,
+  cameraAt,
+  heightAt,
+  castToGround,
+  sheetWidth,
+  inscriptions,
+  nearTrail,
+  metres,
+  rng,
+  trailPoint,
+} from "./world";
+import type { Chapter, ExploreProject, Inscription, Shot } from "./world";
+import { panelFor } from "./content";
+import { FAR_RED, farSize, graniteTexture, inscriptionSize, paintArch, paintBanner, paintFar, paintFlag, paintMani, paintOnRock, paintSnow, paintStone } from "./painter";
+
+type Props = {
+  projects: ExploreProject[];
+  /** Scroll position in chapters: 0 = intro, 1.5 = halfway to the third. */
+  progress: RefObject<number>;
+  active: number;
+  night: boolean;
+  reducedMotion: boolean;
+  altitude: RefObject<HTMLElement | null>;
+  /** Where the camera actually is, in chapters; it trails the scroll. */
+  playhead: RefObject<number>;
+  onReady: () => void;
+  /** The element pointer events come from: the page sits over the canvas. */
+  eventRoot?: RefObject<HTMLElement | null>;
+};
+
+const SEGMENTS = 420;
+
+// Rock weathering that depends only on position, so the corners that
+// triangles share move together and the surface never tears.
+const rockNoise = new ImprovedNoise();
+function weather(v: THREE.Vector3, amount: number, seed: number) {
+  const f = 1.4;
+  v.x += rockNoise.noise(v.x * f + seed, v.y * f, v.z * f) * amount;
+  v.y += rockNoise.noise(v.x * f, v.y * f + seed, v.z * f + 3.3) * amount;
+  v.z += rockNoise.noise(v.x * f + 7.1, v.y * f, v.z * f + seed) * amount * 1.4;
+}
+
+/* ── Terrain ────────────────────────────────────────────────────────────── */
+
+// Surface colour, snow, rock strata and fine bump, all per pixel, so the
+// ground holds up when the camera comes in close.
+const TERRAIN_COMMON = /* glsl */ `
+varying vec3 vWPos;
+varying vec3 vWNorm;
+float xpHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float xpNoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(xpHash(i), xpHash(i + vec2(1.0, 0.0)), u.x), mix(xpHash(i + vec2(0.0, 1.0)), xpHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float xpFbm(vec2 p) {
+  float s = 0.0; float a = 0.5;
+  for (int i = 0; i < 5; i++) { s += a * xpNoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 3.1; a *= 0.5; }
+  return s;
+}
+`;
+
+const TERRAIN_COLOR = /* glsl */ `
+  vec3 wn = normalize(vWNorm);
+  float h = vWPos.y;
+  float level = wn.y;
+  float broad = xpFbm(vWPos.xz * 0.07);
+  float fine = xpFbm(vWPos.xz * 0.9);
+
+  vec3 meadow = vec3(0.36, 0.45, 0.24);
+  vec3 forest = vec3(0.19, 0.29, 0.17);
+  vec3 scrub = vec3(0.52, 0.45, 0.33);
+  vec3 rock = vec3(0.45, 0.41, 0.38);
+  vec3 darkRock = vec3(0.21, 0.2, 0.2);
+  vec3 snowC = vec3(0.95, 0.96, 0.99);
+  vec3 shore = vec3(0.66, 0.6, 0.47);
+
+  vec3 col = mix(meadow, forest, smoothstep(3.0, 8.0, h + broad * 4.0));
+  col = mix(col, scrub, smoothstep(9.0, 15.0, h + broad * 5.0));
+  col = mix(col, rock, smoothstep(14.0, 21.0, h + broad * 5.0));
+
+  // Steep faces: bare rock in bands, like bedding planes.
+  float strata = xpFbm(vec2(vWPos.x * 0.04 + vWPos.z * 0.03, h * 0.8));
+  vec3 cliff = mix(darkRock, rock, smoothstep(0.25, 0.75, strata)) * (0.8 + fine * 0.4);
+  col = mix(col, cliff, smoothstep(0.3, 0.6, 1.0 - level));
+
+  // Snow lies above a ragged line wherever the slope can hold it; higher up
+  // it dusts even the steep faces.
+  float snowline = 19.0 + (broad - 0.5) * 10.0;
+  float snowAmt = smoothstep(snowline - 1.5, snowline + 2.0, h) * smoothstep(0.42, 0.68, level + (fine - 0.5) * 0.3);
+  snowAmt = max(snowAmt, smoothstep(snowline + 5.0, snowline + 16.0, h) * smoothstep(0.2, 0.48, level + (fine - 0.5) * 0.4) * 0.85);
+  // Up high, snow plasters every face that isn't sheer.
+  snowAmt = max(snowAmt, smoothstep(snowline + 9.0, snowline + 15.0, h) * smoothstep(0.04, 0.26, level + (fine - 0.5) * 0.15) * 0.94);
+  col = mix(col, snowC * (0.93 + fine * 0.07), snowAmt);
+  col = mix(shore, col, smoothstep(${(WATER + 0.2).toFixed(2)}, ${(WATER + 1.2).toFixed(2)}, h));
+
+  diffuseColor.rgb = pow(col, vec3(2.2));
+`;
+
+function useTerrainMaterial() {
+  return useMemo(() => {
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNorm;")
+        .replace(
+          "#include <worldpos_vertex>",
+          "#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNorm = normalize(mat3(modelMatrix) * objectNormal);",
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>\n${TERRAIN_COMMON}`)
+        .replace("#include <color_fragment>", TERRAIN_COLOR)
+        .replace(
+          "#include <roughnessmap_fragment>",
+          "#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.5, snowAmt);",
+        )
+        .replace(
+          "#include <normal_fragment_maps>",
+          `#include <normal_fragment_maps>
+          {
+            vec2 bp = vWPos.xz * 1.1;
+            float e = 0.08;
+            float b0 = xpFbm(bp);
+            float bx = xpFbm(bp + vec2(e, 0.0));
+            float bz = xpFbm(bp + vec2(0.0, e));
+            vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9;
+            normal = normalize(normal + (viewMatrix * vec4(bump, 0.0)).xyz);
+          }`,
+        );
+    };
+    return material;
+  }, []);
+}
+
+function Terrain() {
+  const geometry = useMemo(() => {
+    const g = new THREE.PlaneGeometry(WORLD, WORLD, SEGMENTS, SEGMENTS);
+    g.rotateX(-Math.PI / 2);
+    const position = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) position.setY(i, heightAt(position.getX(i), position.getZ(i)));
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  const material = useTerrainMaterial();
+  useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
+  return <mesh geometry={geometry} material={material} receiveShadow castShadow />;
+}
+
+// A Himalayan fir: a short trunk carrying four tiers of drooping, ragged
+// branches, dark inside each tier and lighter at the tips.
+function useFirGeometry() {
+  return useMemo(() => {
+    const random = rng(17);
+    const paint = (g: THREE.BufferGeometry, colourAt: (y: number, rim: number) => THREE.Color) => {
+      const pos = g.attributes.position as THREE.BufferAttribute;
+      const colours = new Float32Array(pos.count * 3);
+      g.computeBoundingBox();
+      const { min, max } = g.boundingBox!;
+      for (let i = 0; i < pos.count; i += 1) {
+        const y = (pos.getY(i) - min.y) / (max.y - min.y || 1);
+        const rim = Math.hypot(pos.getX(i), pos.getZ(i));
+        const c = colourAt(y, rim);
+        colours[i * 3] = c.r;
+        colours[i * 3 + 1] = c.g;
+        colours[i * 3 + 2] = c.b;
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+      return g;
+    };
+    const parts: THREE.BufferGeometry[] = [];
+    const trunk = new THREE.CylinderGeometry(0.07, 0.12, 1, 6);
+    trunk.translate(0, 0.5, 0);
+    parts.push(paint(trunk, () => new THREE.Color("#4a3325")));
+    const dark = new THREE.Color("#183322");
+    const light = new THREE.Color("#4b7a43");
+    for (let k = 0; k < 4; k += 1) {
+      const r = 1.0 * (1 - k * 0.21);
+      const h = 1.2 * (1 - k * 0.13);
+      const y0 = 0.55 + k * 0.58;
+      const cone = new THREE.ConeGeometry(r, h, 11, 2);
+      const pos = cone.attributes.position as THREE.BufferAttribute;
+      // Ragged, drooping rim: branch tips at uneven lengths, hanging down.
+      for (let i = 0; i < pos.count; i += 1) {
+        const y = pos.getY(i);
+        if (y < -h / 2 + 0.01) {
+          const reach = 0.82 + random() * 0.38;
+          pos.setX(i, pos.getX(i) * reach);
+          pos.setZ(i, pos.getZ(i) * reach);
+          pos.setY(i, y - random() * 0.22);
+        } else if (y < h / 2 - 0.01) {
+          pos.setX(i, pos.getX(i) * (0.9 + random() * 0.2));
+          pos.setZ(i, pos.getZ(i) * (0.9 + random() * 0.2));
+        }
+      }
+      cone.translate(0, y0 + h / 2, 0);
+      parts.push(paint(cone, (y, rim) => dark.clone().lerp(light, Math.min(1, 0.25 + rim * 0.45 + y * 0.35 + k * 0.06))));
+    }
+    const merged = BufferGeometryUtils.mergeGeometries(parts.map((g) => g.toNonIndexed()))!;
+    merged.computeVertexNormals();
+    return merged;
+  }, []);
+}
+
+function Trees() {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const geometry = useFirGeometry();
+  const transforms = useMemo(() => {
+    const random = rng(42);
+    const out: { x: number; y: number; z: number; s: number; tint: number; turn: number; lean: number }[] = [];
+    for (let tries = 0; tries < 40000 && out.length < 3600; tries += 1) {
+      const x = (random() - 0.5) * WORLD * 0.92;
+      const z = (random() - 0.5) * WORLD * 0.92;
+      const y = heightAt(x, z);
+      if (y < WATER + 0.9 || y > 13) continue;
+      const slope = Math.abs(heightAt(x + 1, z) - y) + Math.abs(heightAt(x, z + 1) - y);
+      if (slope > 1.1 || (nearTrail(x, z)?.d ?? Infinity) < 5) continue;
+      const patch = Math.sin(x * 0.07) + Math.cos(z * 0.06) + Math.sin((x + z) * 0.04);
+      if (patch < 0 || random() > 1 - y / 15) continue;
+      out.push({ x, y, z, s: 0.55 + random() * 0.85, tint: random(), turn: random() * Math.PI * 2, lean: (random() - 0.5) * 0.08 });
+    }
+    return out;
+  }, []);
+
+  useEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion();
+    const euler = new THREE.Euler();
+    const color = new THREE.Color();
+    transforms.forEach((t, i) => {
+      rotation.setFromEuler(euler.set(t.lean, t.turn, t.lean * 0.6));
+      matrix.compose(new THREE.Vector3(t.x, t.y - 0.15, t.z), rotation, new THREE.Vector3(t.s, t.s * (0.95 + t.tint * 0.45), t.s));
+      mesh.setMatrixAt(i, matrix);
+      // Each tree a little different: some bluer, some yellower, some darker.
+      mesh.setColorAt(i, color.setRGB(0.78 + t.tint * 0.3, 0.82 + t.tint * 0.22, 0.74 + (1 - t.tint) * 0.22));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [transforms]);
+
+  return (
+    <instancedMesh ref={ref} args={[geometry, undefined, transforms.length]} castShadow receiveShadow>
+      <meshStandardMaterial vertexColors flatShading roughness={0.95} />
+    </instancedMesh>
+  );
+}
+
+function Water({ night }: { night: boolean }) {
+  return (
+    <mesh rotation-x={-Math.PI / 2} position-y={WATER} receiveShadow>
+      <planeGeometry args={[WORLD, WORLD]} />
+      <meshPhysicalMaterial color={night ? "#16223d" : "#3d6f8f"} roughness={0.08} metalness={0.2} clearcoat={1} transparent opacity={0.9} />
+    </mesh>
+  );
+}
+
+/* ── Clouds ─────────────────────────────────────────────────────────────── */
+
+function usePuffTexture() {
+  return useMemo(() => {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    const random = rng(3);
+    for (let i = 0; i < 26; i += 1) {
+      const r = size * (0.12 + random() * 0.2);
+      const a = random() * Math.PI * 2;
+      const d = random() * size * 0.22;
+      const x = size / 2 + Math.cos(a) * d;
+      const y = size / 2 + Math.sin(a) * d * 0.6;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, "rgba(255,255,255,0.32)");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }, []);
+}
+
+// True when a puff would sit in, or in front of, a chapter's view.
+function blocks(shot: Shot, p: [number, number, number]) {
+  const [ax, ay, az] = shot.pos;
+  const vx = shot.target[0] - ax;
+  const vy = shot.target[1] - ay;
+  const vz = shot.target[2] - az;
+  const t = Math.min(2.2, Math.max(0, ((p[0] - ax) * vx + (p[1] - ay) * vy + (p[2] - az) * vz) / (vx * vx + vy * vy + vz * vz)));
+  return Math.hypot(ax + vx * t - p[0], ay + vy * t - p[1], az + vz * t - p[2]) < 34;
+}
+
+// Banks of cloud in the valleys, and a high layer the intro descends through.
+function Clouds({ night, shots }: { night: boolean; shots: Shot[] }) {
+  const texture = usePuffTexture();
+  const group = useRef<THREE.Group>(null);
+  const puffs = useMemo(() => {
+    const random = rng(11);
+    const out: { pos: Vec; scale: number; opacity: number; drift: number }[] = [];
+    type Vec = [number, number, number];
+    // High layer, over the approach.
+    // Valley banks, kept away from where the camera stops.
+    for (let tries = 0; tries < 400 && out.length < 60; tries += 1) {
+      const x = (random() - 0.5) * WORLD * 0.85;
+      const z = (random() - 0.5) * WORLD * 0.85;
+      const ground = heightAt(x, z);
+      if (ground > 12) continue;
+      const y = Math.max(ground, WATER) + 7 + random() * 6;
+      if (shots.some((s) => blocks(s, [x, y, z]) || Math.hypot(s.pos[0] - x, s.pos[2] - z) < 75) || Math.abs(x) < 26) continue;
+      out.push({ pos: [x, y, z], scale: 26 + random() * 30, opacity: 0.35 + random() * 0.3, drift: random() });
+    }
+    return out;
+  }, [shots]);
+
+  useFrame(({ clock }) => {
+    const g = group.current;
+    if (!g) return;
+    g.children.forEach((child, i) => {
+      const p = puffs[i];
+      child.position.x = p.pos[0] + Math.sin(clock.elapsedTime * 0.03 + p.drift * 10) * 6;
+    });
+  });
+
+  return (
+    <group ref={group}>
+      {puffs.map((p, i) => (
+        <sprite key={i} position={p.pos} scale={[p.scale, p.scale * 0.55, 1]}>
+          <spriteMaterial map={texture} transparent depthWrite={false} opacity={p.opacity} color={night ? "#5d6b8c" : "#fff4ea"} fog />
+        </sprite>
+      ))}
+    </group>
+  );
+}
+
+/* ── Inscriptions ───────────────────────────────────────────────────────── */
+
+// A mani stone: a thick, weathered slab, its face carved and painted.
+function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; projects: ExploreProject[] }) {
+  const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
+  const mani = at.kind === "mani";
+  // High camp's stone is a slab of cliff; the others are trailside rocks.
+  const width = chapter.key === "sajilo" ? 4 : mani ? 2.8 : 3.2;
+  const { map, bumpMap, height } = useMemo(() => {
+    const painted = mani ? paintMani(panel, panel.accent) : paintStone(panel);
+    return { ...painted, height: inscriptionSize(panel, width).worldHeight };
+  }, [panel, mani, width]);
+
+
+  // Rough out a boulder: a gently domed face for the words, its rim rolling
+  // away into rounded, weathered sides and a broad back.
+  const depth = mani ? 0.8 : 1.6;
+  const geometry = useMemo(() => {
+    const W = width + 0.7;
+    const H = height + 0.7;
+    const g = new THREE.BoxGeometry(W, H, depth, 30, 22, 8);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i += 1) {
+      v.fromBufferAttribute(pos, i);
+      const nx = v.x / (W / 2);
+      const ny = v.y / (H / 2);
+      const nz = v.z / (depth / 2);
+      const edge = Math.max(Math.abs(nx), Math.abs(ny));
+      // Round the whole block toward an ellipsoid, more at the back.
+      const r = Math.hypot(nx * 0.7, ny * 0.7, Math.max(0, -nz) * 0.9);
+      const pull = Math.max(0, r - 0.75) * 0.35;
+      v.x *= 1 - pull;
+      v.y *= 1 - pull * (v.y > 0 ? 1 : 0.4);
+      if (nz > 0.99) {
+        // The face: a low dome, falling away near the rim.
+        v.z -= (nx * nx + ny * ny) * 0.12 + Math.max(0, edge - 0.84) * 1.6;
+        weather(v, edge < 0.84 ? 0.012 : 0.12, 9);
+      } else weather(v, 0.22, 9);
+      pos.setXYZ(i, v.x, v.y, v.z);
+    }
+    const merged = BufferGeometryUtils.mergeVertices(g, 1e-4);
+    merged.computeVertexNormals();
+    g.dispose();
+    return merged;
+  }, [width, height, depth, at.center]);
+
+  // Each face of the box gets a material; only the front carries the words.
+  const materials = useMemo(() => {
+    const stone = graniteTexture(mani ? 3 : 7);
+    stone.map.repeat.set(0.5, 0.5);
+    stone.bumpMap.repeat.copy(stone.map.repeat);
+    const rock = new THREE.MeshStandardMaterial({ map: stone.map, bumpMap: stone.bumpMap, bumpScale: 1.6, color: mani ? "#5a534c" : "#ffffff", roughness: 0.95, emissiveMap: stone.map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: mani ? 0 : 0.06 });
+    // The painted letters carry a little light of their own, like whitewash
+    // catching the sky, so they still read when the stone is in shadow.
+    const face = new THREE.MeshStandardMaterial({ map, bumpMap, bumpScale: 3, roughness: 0.85, emissiveMap: map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: mani ? 0.22 : 0.08 });
+    return [rock, rock, rock, rock, face, rock];
+  }, [map, bumpMap, mani]);
+  useEffect(() => () => { geometry.dispose(); map.dispose(); bumpMap.dispose(); materials.forEach((m) => { m.map?.dispose(); m.bumpMap?.dispose(); m.dispose(); }); }, [geometry, map, bumpMap, materials]);
+
+  // A few loose rocks at the foot, broken off the boulder long ago.
+  const rubble = useMemo(() => {
+    const random = rng(Math.round(Math.abs(at.center[0] * 37 + at.center[2] * 11)));
+    return Array.from({ length: 6 }, () => {
+      const side = random() > 0.5 ? 1 : -1;
+      return {
+        x: side * (width / 2 + 0.1 + random() * 0.9),
+        z: 0.2 + random() * 0.9,
+        s: 0.12 + random() * 0.28,
+        r: random() * 6,
+      };
+    });
+  }, [width, at.center]);
+
+  const yaw = Math.atan2(at.facing[0], at.facing[2]);
+  return (
+    <group position={at.center} rotation={[0, yaw, 0]}>
+      {/* Mani stones lean back against the slope; boulders stand. */}
+      <mesh geometry={geometry} material={materials} rotation-x={mani ? -0.28 : -0.08} castShadow receiveShadow />
+      {/* The rest of the rock, sunk into the ground beneath the face. */}
+      <mesh position={[0, -height / 2 - 1, -depth * 0.25]} rotation-x={mani ? -0.28 : -0.08} scale={[width / 2 + 0.3, 1.4, depth * 0.62]} material={materials[0]} castShadow receiveShadow>
+        <dodecahedronGeometry args={[1, 1]} />
+      </mesh>
+      {rubble.map((r, i) => {
+        const x = r.x;
+        const z = r.z;
+        return (
+          <mesh key={i} position={[x, -height / 2 - 0.3 + r.s * 0.3, z]} rotation={[r.r, r.r * 1.7, r.r * 0.4]} scale={[r.s * 1.3, r.s * 0.8, r.s]} material={materials[0]} castShadow receiveShadow>
+            <dodecahedronGeometry args={[1, 0]} />
+          </mesh>
+        );
+      })}
+      {at.center[1] > 18 && (
+        <mesh position={[0, height / 2 + 0.2, -0.25]} rotation-x={mani ? -0.28 : 0} scale={[width / 2 + 0.2, 0.16, 0.5]}>
+          <sphereGeometry args={[1, 20, 8]} />
+          <meshStandardMaterial color="#f4f6fa" roughness={0.6} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// A rock arch over the trail, painted like the boulders at base camps.
+// The outline is one rough path with the gap notched out of its foot; the
+// pillars run on below ground so the arch sits firm on any slope.
+function Arch({ chapter, at, projects }: { chapter: Chapter; at: Inscription; projects: ExploreProject[] }) {
+  const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
+  const { map, bumpMap } = useMemo(() => paintArch(panel, ARCH), [panel]);
+  const geometry = useMemo(() => {
+    const { width: W, height: H, holeWidth, holeHeight, depth } = ARCH;
+    const random = rng(Math.round(Math.abs(at.center[0] * 131 + at.center[2] * 71)));
+    const base = -4.5;
+    const shape = new THREE.Shape();
+    shape.moveTo(-W / 2, base);
+    // Over the top: a boxy, lumpy boulder outline.
+    for (let i = 0; i <= 40; i += 1) {
+      const a = Math.PI - (i / 40) * Math.PI;
+      const c = Math.cos(a);
+      const r = 1 + (random() - 0.5) * 0.05;
+      const x = (W / 2) * Math.sign(c) * Math.pow(Math.abs(c), 0.45) * r;
+      const y = H * Math.pow(Math.sin(a), 0.3) * r;
+      shape.lineTo(x, Math.max(base, y));
+    }
+    shape.lineTo(W / 2, base);
+    // Back along the foot, and up through the gap.
+    shape.lineTo(holeWidth / 2, base);
+    for (let i = 0; i <= 24; i += 1) {
+      const a = (i / 24) * Math.PI;
+      const x = (holeWidth / 2) * Math.cos(a);
+      const y = Math.max(base, (holeHeight + 0.2) * Math.pow(Math.sin(a), 0.7) - 0.2);
+      shape.lineTo(x + (random() - 0.5) * 0.06, y);
+    }
+    shape.lineTo(-holeWidth / 2, base);
+    shape.lineTo(-W / 2, base);
+
+    const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.35, bevelSize: 0.3, bevelSegments: 3, curveSegments: 8, steps: 3 });
+    g.translate(0, 0, -depth / 2);
+    // Weather everything but the painted face.
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    const seed = random() * 50;
+    for (let i = 0; i < pos.count; i += 1) {
+      v.fromBufferAttribute(pos, i);
+      const face = v.z > depth / 2 + 0.25;
+      weather(v, face ? 0.02 : 0.32, seed);
+      pos.setXYZ(i, v.x, v.y, v.z);
+    }
+    const merged = BufferGeometryUtils.mergeVertices(g, 1e-3);
+    merged.computeVertexNormals();
+    g.dispose();
+    return merged;
+    return g;
+  }, [at.center]);
+
+  const materials = useMemo(() => {
+    // Shape coordinates are world units: map them onto the painted face.
+    map.repeat.set(1 / ARCH.width, 1 / ARCH.height);
+    map.offset.set(0.5, 0);
+    bumpMap.repeat.copy(map.repeat);
+    bumpMap.offset.copy(map.offset);
+    const face = new THREE.MeshStandardMaterial({ map, bumpMap, bumpScale: 1.5, roughness: 0.9, emissiveMap: map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: 0.08 });
+    // The same granite, unpainted, all the way round and through the gap.
+    const stone = graniteTexture(9);
+    stone.map.repeat.set(0.45, 0.45);
+    stone.bumpMap.repeat.copy(stone.map.repeat);
+    // Warmed to match the painted face, and lit a little so the gap isn't a dark rim.
+    const rock = new THREE.MeshStandardMaterial({ map: stone.map, bumpMap: stone.bumpMap, bumpScale: 1.5, color: "#e8d6bc", roughness: 0.92, emissiveMap: stone.map, emissive: new THREE.Color("#f2dcc0"), emissiveIntensity: 0.18 });
+    return [face, rock];
+  }, [map, bumpMap]);
+  useEffect(() => () => { geometry.dispose(); map.dispose(); bumpMap.dispose(); materials.forEach((m) => { m.map?.dispose(); m.bumpMap?.dispose(); m.dispose(); }); }, [geometry, map, bumpMap, materials]);
+
+  const yaw = Math.atan2(at.facing[0], at.facing[2]);
+  const snowy = at.center[1] > 17;
+  return (
+    <group position={at.center} rotation={[0, yaw, 0]}>
+      <mesh geometry={geometry} material={materials} castShadow receiveShadow />
+      {snowy && (
+        <mesh position={[0, ARCH.height - 0.05, 0]} scale={[ARCH.width * 0.36, 0.28, ARCH.depth * 0.62]}>
+          <sphereGeometry args={[1, 24, 10]} />
+          <meshStandardMaterial color="#f4f6fa" roughness={0.6} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// Prayer flags in their five colours: a banner strung between two poles,
+// with a guy line from each pole out to the snow.
+function PrayerFlags({ a, b, guys = true }: { a: THREE.Vector3; b: THREE.Vector3; guys?: boolean }) {
+  const strings = useMemo(() => {
+    const colours = ["#2563eb", "#f8fafc", "#dc2626", "#16a34a", "#facc15"];
+    const top = (p: THREE.Vector3) => p.clone().add(new THREE.Vector3(0, 3.2, 0));
+    const out = (p: THREE.Vector3, away: THREE.Vector3) => {
+      const e = p.clone().add(away.clone().setY(0).normalize().multiplyScalar(5));
+      e.y = heightAt(e.x, e.z) + 0.2;
+      return e;
+    };
+    const span = b.clone().sub(a);
+    const lines: [THREE.Vector3, THREE.Vector3, number][] = guys
+      ? [
+          [top(a), top(b), 0.7],
+          [top(a), out(a, span.clone().negate()), 0.4],
+          [top(b), out(b, span), 0.4],
+        ]
+      : [[top(a), top(b), 0.5]];
+    return lines.map(([start, end, sag], k) => {
+      const points: THREE.Vector3[] = [];
+      for (let i = 0; i <= 24; i += 1) {
+        const t = i / 24;
+        const p = start.clone().lerp(end, t);
+        p.y -= Math.sin(t * Math.PI) * sag;
+        points.push(p);
+      }
+      const count = Math.round(start.distanceTo(end) / 0.34);
+      const flags = Array.from({ length: count }, (_, i) => {
+        const t = (i + 0.5) / count;
+        const p = start.clone().lerp(end, t);
+        p.y -= Math.sin(t * Math.PI) * sag + 0.13;
+        return { p, colour: colours[(i + k) % 5], yaw: Math.atan2(end.x - start.x, end.z - start.z) + Math.PI / 2 };
+      });
+      return { points, flags };
+    });
+  }, [a, b, guys]);
+  const group = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    group.current?.children.forEach((child, i) => {
+      if (child.userData.flag) child.rotation.x = Math.sin(clock.elapsedTime * 3 + i * 0.7) * 0.35;
+    });
+  });
+  return (
+    <group ref={group}>
+      {strings.map((string, k) => <Line key={k} points={string.points} color="#e7e5e4" lineWidth={1} />)}
+      {strings.flatMap((string, k) =>
+        string.flags.map((f, i) => (
+          <mesh key={`${k}-${i}`} position={f.p} rotation-y={f.yaw} userData={{ flag: true }}>
+            <planeGeometry args={[0.2, 0.24]} />
+            <meshStandardMaterial color={f.colour} side={THREE.DoubleSide} roughness={0.8} />
+          </mesh>
+        )),
+      )}
+      {[a, b].map((p, i) => (
+        <mesh key={i} position={[p.x, p.y + 1.6, p.z]}>
+          <cylinderGeometry args={[0.035, 0.05, 3.3, 6]} />
+          <meshStandardMaterial color="#d6d3d1" />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// Across a valley, the haze still sits over the words, but only half as
+// thick as over bare rock, so they read through it as a cut face would.
+function thinFog(shader: { fragmentShader: string }) {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <fog_fragment>",
+    `#ifdef USE_FOG
+      #ifdef FOG_EXP2
+        float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+      #else
+        float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+      #endif
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor * 0.5);
+    #endif`,
+  );
+}
+
+// Words on the mountain itself: painted on rock, or traced in snow. Each
+// point of the text is thrown from the climber's eye onto the ground, so it
+// follows every bump of the slope yet reads true from where they stop.
+function Inscribed({ chapter, at, projects }: { chapter: Chapter; at: Inscription; projects: ExploreProject[] }) {
+  const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
+  const high = at.center[1] > 22;
+  const { map, aspect } = useMemo(() => {
+    if (at.kind === "snow") return paintSnow(panel, panel.accent);
+    // High camp: the words pressed into the snow slope above the camp.
+    if (chapter.key === "sajilo") return paintSnow(panel, "#6d4fc2");
+    // Across the valley the letters must carry over snow and rock alike.
+    if (at.kind === "far") return paintFar(panel, "#f0ebe1", FAR_RED);
+    return paintOnRock(panel, high ? "#b3211c" : "#f4efe6", high ? "#7c3aed" : panel.accent);
+  }, [panel, high, at.kind, chapter.key]);
+  const geometry = useMemo(() => {
+    const eye = new THREE.Vector3(...at.eye);
+    const centre = new THREE.Vector3(...at.center);
+    const ahead = centre.clone().sub(eye);
+    const dist = ahead.length();
+    ahead.normalize();
+    const right = new THREE.Vector3().crossVectors(ahead, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, ahead).normalize();
+    // The text's size on a virtual sheet held at the wall's distance.
+    const width = at.width ?? sheetWidth(dist);
+    const height = width * aspect;
+    const g = new THREE.PlaneGeometry(1, 1, 56, 36);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    const p = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i += 1) {
+      p.copy(centre).addScaledVector(right, pos.getX(i) * width).addScaledVector(up, pos.getY(i) * height);
+      const dir = p.clone().sub(eye).normalize();
+      const hit = castToGround(at.eye, [dir.x, dir.y, dir.z], dist * 2.5);
+      const q = hit ? new THREE.Vector3(...hit) : p;
+      q.addScaledVector(dir, -0.14 - dist * 0.004); // sit just proud of the rock, above the mesh's facets
+      pos.setXYZ(i, q.x, q.y, q.z);
+    }
+    g.computeVertexNormals();
+    if (at.kind === "far") {
+      // Light it as the mountain is lit: the slope's own normal at each point.
+      const normals = g.attributes.normal as THREE.BufferAttribute;
+      const e = 0.6;
+      for (let i = 0; i < pos.count; i += 1) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const n = new THREE.Vector3(heightAt(x - e, z) - heightAt(x + e, z), 2 * e, heightAt(x, z - e) - heightAt(x, z + e)).normalize();
+        normals.setXYZ(i, n.x, n.y, n.z);
+      }
+    }
+    return g;
+  }, [at, aspect]);
+  useEffect(() => () => { geometry.dispose(); map.dispose(); }, [geometry, map]);
+  const snow = at.kind === "snow" || chapter.key === "sajilo";
+  const far = at.kind === "far";
+  return (
+    <mesh geometry={geometry} receiveShadow>
+      <meshStandardMaterial map={map} transparent depthWrite={false} polygonOffset polygonOffsetFactor={-4} polygonOffsetUnits={-4} roughness={0.92} emissiveMap={map} emissive="#ffffff" emissiveIntensity={snow ? 0 : at.kind === "far" ? 0.1 : 0.12} onBeforeCompile={far ? thinFog : undefined} />
+    </mesh>
+  );
+}
+
+const LUNGTA = ["#2563eb", "#f8fafc", "#dc2626", "#16a34a", "#facc15"];
+
+/*
+ * A prayer flag as real cloth: a grid of particles (Verlet), its top row
+ * sewn to the rope, pulled down by gravity and pushed by a gusting wind that
+ * acts on each little facet by how squarely it meets the air, held together
+ * by stretch and shear ties. Projects' flags open their repository on a click.
+ */
+const COLS = 13;
+const ROWS = 11;
+const CLOTH_INDEX = (() => {
+  const index: number[] = [];
+  for (let r = 0; r < ROWS - 1; r += 1)
+    for (let c = 0; c < COLS - 1; c += 1) {
+      const i = r * COLS + c;
+      index.push(i, i + COLS, i + 1, i + 1, i + COLS, i + COLS + 1);
+    }
+  return index;
+})();
+const CLOTH_TIES = (() => {
+  const ties: [number, number, number, number][] = []; // a, b, du, dv (in cells)
+  for (let r = 0; r < ROWS; r += 1)
+    for (let c = 0; c < COLS; c += 1) {
+      const i = r * COLS + c;
+      if (c < COLS - 1) ties.push([i, i + 1, 1, 0]);
+      if (r < ROWS - 1) ties.push([i, i + COLS, 0, 1]);
+      if (c < COLS - 1 && r < ROWS - 1) ties.push([i, i + COLS + 1, 1, 1]);
+      if (c > 0 && r < ROWS - 1) ties.push([i, i + COLS - 1, 1, 1]);
+      // Bend ties, two cells apart, so the cloth curves but never folds flat over itself.
+      if (c < COLS - 2) ties.push([i, i + 2, 2, 0]);
+      if (r < ROWS - 2) ties.push([i, i + COLS * 2, 0, 2]);
+    }
+  return ties;
+})();
+
+type ClothProps = {
+  pin: (u: number) => THREE.Vector3;
+  width: number;
+  height: number;
+  texture: THREE.Texture;
+  wind: THREE.Vector3;
+  seed: number;
+  href?: string;
+  /**
+   * Flown from a pole: the cloth's left edge is sewn to `pin` (0 = top of
+   * the pole, 1 = bottom) and it streams out along this direction. Without
+   * it the top edge is sewn to `pin` (0 = left, 1 = right) and the cloth hangs.
+   */
+  fly?: THREE.Vector3;
+};
+
+function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProps) {
+  const sewn = (i: number) => (fly ? i % COLS === 0 : i < COLS);
+  const sim = useMemo(() => {
+    const n = COLS * ROWS;
+    const pos = new Float32Array(n * 3);
+    const prev = new Float32Array(n * 3);
+    const uv = new Float32Array(n * 2);
+    const pinned: THREE.Vector3[] = [];
+    const edge = fly ? ROWS : COLS;
+    for (let k = 0; k < edge; k += 1) pinned.push(pin(k / (edge - 1)));
+    for (let r = 0; r < ROWS; r += 1)
+      for (let c = 0; c < COLS; c += 1) {
+        const i = r * COLS + c;
+        const at = fly
+          ? pinned[r].clone().addScaledVector(fly, (c / (COLS - 1)) * width)
+          : pinned[c].clone().add(new THREE.Vector3(0, -(r / (ROWS - 1)) * height, 0));
+        pos[i * 3] = prev[i * 3] = at.x;
+        pos[i * 3 + 1] = prev[i * 3 + 1] = at.y;
+        pos[i * 3 + 2] = prev[i * 3 + 2] = at.z;
+        uv[i * 2] = c / (COLS - 1);
+        uv[i * 2 + 1] = 1 - r / (ROWS - 1);
+      }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    geometry.setIndex(CLOTH_INDEX);
+    geometry.computeVertexNormals();
+    const cw = width / (COLS - 1);
+    const ch = height / (ROWS - 1);
+    const rest = CLOTH_TIES.map(([, , du, dv]) => Math.hypot(du * cw, dv * ch));
+    return { pos, prev, pinned, geometry, rest, force: new Float32Array(n * 3), clock: 0, spare: 0 };
+  }, [pin, width, height, fly]);
+  useEffect(() => () => sim.geometry.dispose(), [sim]);
+
+  const material = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide, roughness: 0.9, emissiveMap: texture, emissive: new THREE.Color("#ffffff"), emissiveIntensity: 0.22 });
+    // From behind, the print reads the right way round.
+    m.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <map_fragment>", "vec2 clothUv = gl_FrontFacing ? vMapUv : vec2(1.0 - vMapUv.x, vMapUv.y);\ndiffuseColor *= texture2D(map, clothUv);")
+        .replace("#include <emissivemap_fragment>", "totalEmissiveRadiance *= texture2D(emissiveMap, clothUv).rgb;");
+    };
+    return m;
+  }, [texture]);
+  useEffect(() => () => material.dispose(), [material]);
+
+  const step = (dt: number) => {
+    const { pos, prev, force, pinned, rest } = sim;
+    const t = (sim.clock += dt);
+    // Wind: a steady breeze with slow swells and quick gusts.
+    const gust = 1 + 0.45 * Math.sin(t * 0.83 + seed) + 0.3 * Math.sin(t * 2.3 + seed * 1.7) + 0.2 * Math.sin(t * 5.1 + seed * 0.3);
+    const wx = wind.x * gust;
+    const wy = wind.y * gust;
+    const wz = wind.z * gust;
+    force.fill(0);
+    const idx = CLOTH_INDEX;
+    for (let k = 0; k < idx.length; k += 3) {
+      const a = idx[k] * 3;
+      const b = idx[k + 1] * 3;
+      const c = idx[k + 2] * 3;
+      const e1x = pos[b] - pos[a], e1y = pos[b + 1] - pos[a + 1], e1z = pos[b + 2] - pos[a + 2];
+      const e2x = pos[c] - pos[a], e2y = pos[c + 1] - pos[a + 1], e2z = pos[c + 2] - pos[a + 2];
+      const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x; // length = 2 x area
+      const len = Math.hypot(nx, ny, nz) || 1;
+      const push = ((nx * wx + ny * wy + nz * wz) / len) * 0.5 * len; // facing x area
+      const fx = (nx / len) * push, fy = (ny / len) * push, fz = (nz / len) * push;
+      for (const v of [a, b, c]) {
+        force[v] += fx;
+        force[v + 1] += fy;
+        force[v + 2] += fz;
+      }
+    }
+    const mass = (width * height) / (COLS * ROWS);
+    const dt2 = dt * dt;
+    // Hanging cloths: a ripple through the face and a sway along the rope,
+    // both growing toward the hem, so every flag on a string moves alike.
+    let hang: THREE.Vector3 | null = null;
+    let rope: THREE.Vector3 | null = null;
+    if (!fly) {
+      rope = pinned[pinned.length - 1].clone().sub(pinned[0]).setY(0).normalize();
+      hang = new THREE.Vector3().crossVectors(rope, new THREE.Vector3(0, 1, 0)).normalize();
+    }
+    // A flag on a pole is carried out by the wind's drag, not only its push.
+    const carry = fly ? 26 * (0.8 + 0.2 * gust) : 0;
+    const flutter = fly ? 1 : 0;
+    // Across the cloth: the axis waves travel through, as a flag snaps in wind.
+    const across = fly ? new THREE.Vector3().crossVectors(fly, new THREE.Vector3(0, 1, 0)).normalize() : null;
+    for (let i = 0; i < COLS * ROWS; i += 1) {
+      if (sewn(i)) continue;
+      const o = i * 3;
+      const reach = fly ? (i % COLS) / (COLS - 1) : 0;
+      for (let k = 0; k < 3; k += 1) {
+        const v = (pos[o + k] - prev[o + k]) * 0.985;
+        prev[o + k] = pos[o + k];
+        const w = k === 0 ? wx : k === 1 ? wy : wz;
+        let drift = (carry * w) / (Math.hypot(wx, wy, wz) || 1);
+        if (hang && rope) {
+          const col = (i % COLS) / (COLS - 1);
+          const row = Math.floor(i / COLS) / (ROWS - 1);
+          const ripple = Math.sin(t * 5.2 + col * 3.4 - row * 2.6 + seed) * (0.55 + 0.45 * gust);
+          const sway = Math.sin(t * 1.4 + seed * 0.7) * 0.6 + Math.sin(t * 3.3 + seed) * 0.25;
+          drift += (hang.getComponent(k) * ripple * 3 + rope.getComponent(k) * sway * 1.1) * row;
+        }
+        if (across) {
+          const row = Math.floor(i / COLS) / (ROWS - 1);
+          // A wave running out from the pole, growing toward the free end.
+          const wave = Math.sin(reach * 7.5 - t * 8.5 + row * 1.4 + seed) * (0.35 + 0.65 * gust);
+          const lift = Math.sin(reach * 4 - t * 3.2 + seed) * 0.5;
+          const a = across.getComponent(k) * wave * 14 * reach * flutter + (k === 1 ? lift * 4 * reach : 0);
+          drift += a;
+        }
+        pos[o + k] += v + ((force[o + k] / mass) * 0.06 + drift) * dt2 + (k === 1 ? -9.8 * dt2 : 0);
+      }
+    }
+    for (let it = 0; it < 6; it += 1) {
+      for (let k = 0; k < CLOTH_TIES.length; k += 1) {
+        const [i, j] = CLOTH_TIES[k];
+        const a = i * 3;
+        const b = j * 3;
+        const dx = pos[b] - pos[a], dy = pos[b + 1] - pos[a + 1], dz = pos[b + 2] - pos[a + 2];
+        const d = Math.hypot(dx, dy, dz) || 1e-6;
+        // Bend ties only nudge, so the cloth curves softly.
+        const bend = CLOTH_TIES[k][2] === 2 || CLOTH_TIES[k][3] === 2;
+        const diff = ((d - rest[k]) / d) * (bend ? 0.22 : 1);
+        const pa = sewn(i) ? 0 : 1;
+        const pb = sewn(j) ? 0 : 1;
+        const share = pa + pb;
+        if (!share) continue;
+        const ka = (pa / share) * diff;
+        const kb = (pb / share) * diff;
+        pos[a] += dx * ka; pos[a + 1] += dy * ka; pos[a + 2] += dz * ka;
+        pos[b] -= dx * kb; pos[b + 1] -= dy * kb; pos[b + 2] -= dz * kb;
+      }
+      for (let k = 0; k < pinned.length; k += 1) {
+        const o = (fly ? k * COLS : k) * 3;
+        pos[o] = pinned[k].x;
+        pos[o + 1] = pinned[k].y;
+        pos[o + 2] = pinned[k].z;
+      }
+    }
+  };
+
+  // Let it settle before anyone sees it.
+  useMemo(() => { for (let i = 0; i < 180; i += 1) step(1 / 60); }, [sim]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useFrame((_, delta) => {
+    sim.spare = Math.min(sim.spare + delta, 0.1);
+    let steps = 0;
+    while (sim.spare >= 1 / 60 && steps < 4) {
+      step(1 / 60);
+      sim.spare -= 1 / 60;
+      steps += 1;
+    }
+    if (!steps) return;
+    sim.geometry.attributes.position.needsUpdate = true;
+    sim.geometry.computeVertexNormals();
+    sim.geometry.computeBoundingSphere();
+  });
+
+  const [hover, setHover] = useState(false);
+  useEffect(() => {
+    material.emissiveIntensity = hover ? 0.5 : 0.22;
+  }, [hover, material]);
+  useEffect(() => () => { if (href) document.body.style.cursor = ""; }, [href]);
+  return (
+    <mesh
+      geometry={sim.geometry}
+      material={material}
+      castShadow
+      frustumCulled={false}
+      onPointerOver={href ? (e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; } : undefined}
+      onPointerOut={href ? () => { setHover(false); document.body.style.cursor = ""; } : undefined}
+      onClick={href ? (e) => { e.stopPropagation(); window.open(href, "_blank", "noopener,noreferrer"); } : undefined}
+    />
+  );
+}
+
+/*
+ * Camp II's projects, as a string of prayer flags tied across the rock wall
+ * beneath the painted words: one rope, flags all of a size in the five
+ * colours in their order, the projects printed on the middle ones.
+ */
+function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType<typeof panelFor>; projects: ExploreProject[] }) {
+  const rig = useMemo(() => {
+    const { w, h } = farSize(panel);
+    const eye = new THREE.Vector3(...at.eye);
+    const centre = new THREE.Vector3(...at.center);
+    const ahead = centre.clone().sub(eye);
+    const dist = ahead.length();
+    ahead.normalize();
+    const right = new THREE.Vector3().crossVectors(ahead, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, ahead).normalize();
+    const width = at.width ?? sheetWidth(dist);
+    const height = (width * h) / w;
+    const onWall = (a: number, b: number, off: number) => {
+      const p = centre.clone().addScaledVector(right, (a * width) / 2).addScaledVector(up, (b * height) / 2);
+      const dir = p.clone().sub(eye).normalize();
+      const hit = castToGround(at.eye, [dir.x, dir.y, dir.z], dist * 2.5);
+      return (hit ? new THREE.Vector3(...hit) : p).addScaledVector(dir, -off);
+    };
+    const start = onWall(-1.45, -0.98, 0.15);
+    const end = onWall(1.45, -0.98, 0.15);
+    const sag = 0.16;
+    const along = (t: number) => {
+      const p = start.clone().lerp(end, t);
+      p.y -= Math.sin(t * Math.PI) * sag;
+      const dir = p.clone().sub(eye).normalize();
+      const hit = castToGround(at.eye, [dir.x, dir.y, dir.z], dist * 2.5);
+      if (hit) {
+        const wall = new THREE.Vector3(...hit).distanceTo(eye);
+        if (p.distanceTo(eye) > wall - 1) p.copy(eye).addScaledVector(dir, wall - 1);
+      }
+      return p;
+    };
+    const points = Array.from({ length: 41 }, (_, i) => along(i / 40));
+    // Flags all of a size, a little apart, the projects in the middle.
+    const plain = 1;
+    const slots = projects.length + plain * 2;
+    const span = start.distanceTo(end);
+    const pitch = Math.min(1.25, (span * 0.9) / slots);
+    const cloth = pitch * 0.88;
+    const first = 0.5 - ((slots * pitch) / span) / 2;
+    const flags = Array.from({ length: slots }, (_, k) => {
+      const t0 = first + (k * pitch + (pitch - cloth) / 2) / span;
+      const t1 = t0 + cloth / span;
+      const project = k >= plain && k < plain + projects.length ? projects[k - plain] : undefined;
+      return {
+        key: project?.url ?? `plain-${k}`,
+        project,
+        colour: LUNGTA[k % 5],
+        pin: (u: number) => along(t0 + (t1 - t0) * u).add(new THREE.Vector3(0, -0.02, 0)),
+      };
+    });
+    // The breeze comes along the wall and a little off it, toward the climber.
+    const wind = right.clone().multiplyScalar(1.1).addScaledVector(ahead, -0.45).add(new THREE.Vector3(0, 0.15, 0));
+    return { points, flags, cloth, wind };
+  }, [at, panel, projects]);
+  const textures = useMemo(
+    () => rig.flags.map((f) => paintFlag(f.project?.name ?? "", f.project?.language ?? null, f.colour)),
+    [rig],
+  );
+  useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
+  return (
+    <>
+      <Line points={rig.points} color="#e7e5e4" lineWidth={1.3} />
+      {rig.flags.map((f, i) => (
+        <Cloth
+          key={f.key}
+          pin={f.pin}
+          width={rig.cloth}
+          height={rig.cloth * (400 / 512)}
+          texture={textures[i]}
+          wind={rig.wind}
+          seed={i * 1.9}
+          href={f.project?.url}
+        />
+      ))}
+    </>
+  );
+}
+
+/*
+ * A rope of prayer flags tied from `start` down to a stake at `end`: small
+ * cloths of one size in the five colours in order, each sewn along the rope
+ * and lifting in the wind, like the strings at Camp II.
+ */
+function RopeFlags({ start, end, sag, wind }: { start: THREE.Vector3; end: THREE.Vector3; sag: number; wind: THREE.Vector3 }) {
+  const rig = useMemo(() => {
+    const along = (t: number) => {
+      const p = start.clone().lerp(end, t);
+      p.y -= Math.sin(t * Math.PI) * sag;
+      return p;
+    };
+    const points = Array.from({ length: 33 }, (_, i) => along(i / 32));
+    const span = start.distanceTo(end);
+    const pitch = 0.46;
+    const cloth = pitch * 0.84;
+    const count = Math.max(3, Math.floor((span - 0.6) / pitch));
+    const first = (span - count * pitch) / 2 / span;
+    const flags = Array.from({ length: count }, (_, k) => {
+      const t0 = first + (k * pitch + (pitch - cloth) / 2) / span;
+      const t1 = t0 + cloth / span;
+      return { colour: LUNGTA[k % 5], pin: (u: number) => along(t0 + (t1 - t0) * u).add(new THREE.Vector3(0, -0.015, 0)) };
+    });
+    return { points, flags, cloth };
+  }, [start, end, sag]);
+  const textures = useMemo(() => rig.flags.map((f) => paintFlag("", null, f.colour)), [rig]);
+  useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
+  return (
+    <>
+      <Line points={rig.points} color="#e7e5e4" lineWidth={1.1} />
+      {rig.flags.map((f, i) => (
+        <Cloth key={i} pin={f.pin} width={rig.cloth} height={rig.cloth * (400 / 512)} texture={textures[i]} wind={wind} seed={i * 2.3 + 1} />
+      ))}
+      {/* The stake the rope is tied off to. */}
+      <mesh position={[end.x, end.y - 0.25, end.z]} rotation-z={0.12}>
+        <cylinderGeometry args={[0.03, 0.035, 0.9, 6]} />
+        <meshStandardMaterial color="#8b7355" roughness={0.9} />
+      </mesh>
+    </>
+  );
+}
+
+/*
+ * The summit: one flag on a tall pole planted in the snow, flying out in the
+ * wind with the last chapter printed on it, and prayer flags tied off the pole.
+ */
+function SummitFlag({ at, chapter, projects }: { at: Inscription; chapter: Chapter; projects: ExploreProject[] }) {
+  const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
+  const { texture, aspect } = useMemo(() => paintBanner(panel), [panel]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  const rig = useMemo(() => {
+    const centre = new THREE.Vector3(...at.center);
+    const toward = new THREE.Vector3(at.facing[0], 0, at.facing[2]).normalize();
+    const right = new THREE.Vector3().crossVectors(toward.clone().negate(), new THREE.Vector3(0, 1, 0)).normalize();
+    const width = 2.1;
+    const height = width * aspect;
+    // The pole stands at the flag's left edge; the cloth flies out to the right,
+    // its middle where the climber is looking.
+    const foot = centre.clone().addScaledVector(right, -width / 2);
+    const ground = heightAt(foot.x, foot.z);
+    const top = centre.y + height / 2;
+    const pole = { base: new THREE.Vector3(foot.x, ground - 0.3, foot.z), height: top + 0.15 - (ground - 0.3) };
+    const hoist = new THREE.Vector3(foot.x, top - 0.08, foot.z).addScaledVector(toward, 0.05);
+    const pin = (v: number) => hoist.clone().add(new THREE.Vector3(0, -v * height, 0));
+    const fly = right.clone();
+    // Mostly along the cloth, a little across it, so it streams and ripples.
+    const wind = right.clone().multiplyScalar(1).addScaledVector(toward, 0.06).add(new THREE.Vector3(0, 0.12, 0));
+    // Prayer flags tied below the summit flag, running down and out to the
+    // left to a stake in the snow, clear of the flag and its words.
+    const ropeStart = new THREE.Vector3(foot.x, top - height - 0.35, foot.z).addScaledVector(toward, -0.05);
+    const ropeEnd = new THREE.Vector3(foot.x, 0, foot.z).addScaledVector(right, -4.6).addScaledVector(toward, 0.6);
+    ropeEnd.y = heightAt(ropeEnd.x, ropeEnd.z) + 0.2;
+    const ropeWind = right.clone().multiplyScalar(1.6).addScaledVector(toward, 0.8).add(new THREE.Vector3(0, 0.2, 0));
+    return { width, height, pole, pin, fly, wind, ropeStart, ropeEnd, ropeWind };
+  }, [at, aspect]);
+  return (
+    <group>
+      <mesh position={[rig.pole.base.x, rig.pole.base.y + rig.pole.height / 2, rig.pole.base.z]} castShadow>
+        <cylinderGeometry args={[0.04, 0.06, rig.pole.height, 8]} />
+        <meshStandardMaterial color="#cfc8bd" roughness={0.6} />
+      </mesh>
+      <mesh position={[rig.pole.base.x, rig.pole.base.y + rig.pole.height + 0.04, rig.pole.base.z]}>
+        <sphereGeometry args={[0.08, 12, 8]} />
+        <meshStandardMaterial color="#d4a72c" metalness={0.6} roughness={0.35} />
+      </mesh>
+      <Cloth pin={rig.pin} width={rig.width} height={rig.height} texture={texture} wind={rig.wind} seed={4.2} fly={rig.fly} />
+      <RopeFlags start={rig.ropeStart} end={rig.ropeEnd} sag={0.25} wind={rig.ropeWind} />
+    </group>
+  );
+}
+
+
+/* ── Camera ─────────────────────────────────────────────────────────────── */
+
+// The camera keeps its own pace: a gesture moves the page one chapter at
+// once, but the climb between two stops always takes a few seconds.
+function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "progress" | "playhead" | "reducedMotion" | "altitude">) {
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  const pointer = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      pointer.current.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.current.y = (e.clientY / window.innerHeight) * 2 - 1;
+    };
+    window.addEventListener("pointermove", move, { passive: true });
+    return () => window.removeEventListener("pointermove", move);
+  }, []);
+
+  const state = useMemo(() => ({
+    head: 0,
+    pos: new THREE.Vector3(...STOP_SHOTS[0].pos),
+    target: new THREE.Vector3(...STOP_SHOTS[0].target),
+    wantPos: new THREE.Vector3(),
+    wantTarget: new THREE.Vector3(),
+    look: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    up: new THREE.Vector3(0, 1, 0),
+    sway: { x: 0, y: 0 },
+    frame: 0,
+  }), []);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const goal = progress.current ?? 0;
+    const gap = goal - state.head;
+    if (reducedMotion) state.head = goal;
+    else {
+      // About four seconds a leg; faster when several stops away.
+      const speed = 0.26 + Math.max(0, Math.abs(gap) - 1) * 0.6;
+      state.head += Math.sign(gap) * Math.min(Math.abs(gap), speed * dt);
+    }
+    playhead.current = state.head;
+
+    const shot = cameraAt(state.head);
+    state.wantPos.set(...shot.pos);
+    state.wantTarget.set(...shot.target);
+
+    // On a narrow screen, step back from an inscription until it fits.
+    const aspect = size.width / size.height;
+    if (aspect < 1 && shot.focus > 0) {
+      const back = 1 + (Math.min(2.4, 1.15 / aspect) - 1) * shot.focus;
+      state.wantPos.sub(state.wantTarget).multiplyScalar(back).add(state.wantTarget);
+      state.wantPos.y = Math.max(state.wantPos.y, heightAt(state.wantPos.x, state.wantPos.z) + 0.8);
+    }
+
+    // A slight lean toward the pointer, as if turning your head.
+    state.sway.x = THREE.MathUtils.damp(state.sway.x, pointer.current.x, 2.5, dt);
+    state.sway.y = THREE.MathUtils.damp(state.sway.y, pointer.current.y, 2.5, dt);
+    if (!reducedMotion) {
+      state.look.subVectors(state.wantTarget, state.wantPos);
+      state.right.crossVectors(state.look, state.up).normalize();
+      const reach = Math.min(state.look.length(), 12);
+      state.wantTarget.addScaledVector(state.right, state.sway.x * reach * 0.08);
+      state.wantTarget.y -= state.sway.y * reach * 0.05;
+    }
+
+    const k = reducedMotion ? 1 : 1 - Math.exp(-dt * 10);
+    state.pos.lerp(state.wantPos, k);
+    state.target.lerp(state.wantTarget, k);
+    // Smoothing cuts corners on the switchbacks: never let it cut into rock.
+    state.pos.y = Math.max(state.pos.y, heightAt(state.pos.x, state.pos.z) + 0.7);
+    camera.position.copy(state.pos);
+    camera.lookAt(state.target);
+
+    state.frame = (state.frame + 1) % 5;
+    if (!state.frame && altitude.current) altitude.current.textContent = `${metres(camera.position.y).toLocaleString()} m`;
+  });
+  return null;
+}
+
+// The trail: packed earth worn into the hillside. A darker, smoother line
+// down the middle where feet go, loose pebbles and a few set stones, and
+// ragged edges where the path gives way to grass and scree.
+function useTrailTextures() {
+  return useMemo(() => {
+    const W = 512;
+    const H = 1024;
+    const colour = document.createElement("canvas");
+    const bump = document.createElement("canvas");
+    colour.width = bump.width = W;
+    colour.height = bump.height = H;
+    const c = colour.getContext("2d")!;
+    const b = bump.getContext("2d")!;
+    const random = rng(5);
+    // Earth: mottled browns, darker and smoother along the worn line.
+    c.fillStyle = "#d2bd9a";
+    c.fillRect(0, 0, W, H);
+    b.fillStyle = "#808080";
+    b.fillRect(0, 0, W, H);
+    for (let i = 0; i < 900; i += 1) {
+      const r = 10 + random() * 60;
+      const tone = random();
+      c.fillStyle = tone > 0.5 ? `rgba(160,140,112,${0.05 + random() * 0.08})` : `rgba(70,56,42,${0.05 + random() * 0.08})`;
+      c.beginPath();
+      c.ellipse(random() * W, random() * H, r, r * (0.4 + random() * 0.6), random() * 3, 0, Math.PI * 2);
+      c.fill();
+    }
+    const worn = c.createLinearGradient(0, 0, W, 0);
+    worn.addColorStop(0.2, "rgba(60,46,34,0)");
+    worn.addColorStop(0.42, "rgba(90,70,50,0.14)");
+    worn.addColorStop(0.5, "rgba(90,70,50,0.18)");
+    worn.addColorStop(0.58, "rgba(90,70,50,0.14)");
+    worn.addColorStop(0.8, "rgba(60,46,34,0)");
+    c.fillStyle = worn;
+    c.fillRect(0, 0, W, H);
+    // Footfalls: faint scuffs in the worn line.
+    for (let i = 0; i < 220; i += 1) {
+      const x = W * (0.38 + random() * 0.24);
+      c.fillStyle = `rgba(48,36,26,${0.06 + random() * 0.08})`;
+      c.beginPath();
+      c.ellipse(x, random() * H, 7 + random() * 6, 14 + random() * 10, (random() - 0.5) * 0.4, 0, Math.PI * 2);
+      c.fill();
+    }
+    // Pebbles and grit, thicker toward the edges where feet don't sweep them.
+    const pebble = (x: number, y: number, r: number) => {
+      const shade = 110 + random() * 110;
+      const warm = random() * 14;
+      c.fillStyle = "rgba(30,22,16,0.45)";
+      c.beginPath();
+      c.ellipse(x + r * 0.35, y + r * 0.4, r, r * 0.75, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = `rgb(${shade + warm},${shade},${shade - warm})`;
+      c.beginPath();
+      c.ellipse(x, y, r, r * (0.6 + random() * 0.35), random() * 3, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "rgba(255,250,240,0.35)";
+      c.beginPath();
+      c.ellipse(x - r * 0.3, y - r * 0.3, r * 0.4, r * 0.25, 0, 0, Math.PI * 2);
+      c.fill();
+      const g = b.createRadialGradient(x, y, 0, x, y, r * 1.1);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(1, "rgba(128,128,128,0)");
+      b.fillStyle = g;
+      b.beginPath();
+      b.arc(x, y, r * 1.1, 0, Math.PI * 2);
+      b.fill();
+    };
+    for (let i = 0; i < 2600; i += 1) {
+      const edge = random() < 0.6;
+      const x = edge ? (random() < 0.5 ? random() * W * 0.3 : W - random() * W * 0.3) : random() * W;
+      pebble(x, random() * H, 1 + random() * 3.2);
+    }
+    for (let i = 0; i < 70; i += 1) pebble(random() * W, random() * H, 6 + random() * 10);
+    // Ragged edges: the path's width wanders, and grass creeps in.
+    const img = c.getImageData(0, 0, W, H);
+    const wobble = (y: number, seed: number) =>
+      Math.sin(y * 0.011 + seed) * 22 + Math.sin(y * 0.047 + seed * 2.1) * 10 + Math.sin(y * 0.19 + seed * 3.7) * 4;
+    for (let y = 0; y < H; y += 1) {
+      const left = 70 + wobble(y, 1.3);
+      const right = W - 70 + wobble(y, 4.1);
+      for (let x = 0; x < W; x += 1) {
+        const o = (y * W + x) * 4;
+        const d = Math.min(x - left, right - x);
+        const a = Math.max(0, Math.min(1, (d + 30) / 60));
+        const grass = Math.max(0, Math.min(1, (20 - d) / 50));
+        img.data[o] = img.data[o] * (1 - grass * 0.35) + 70 * grass * 0.35;
+        img.data[o + 1] = img.data[o + 1] * (1 - grass * 0.35) + 82 * grass * 0.35;
+        img.data[o + 2] = img.data[o + 2] * (1 - grass * 0.35) + 44 * grass * 0.35;
+        img.data[o + 3] = Math.round(255 * a * a * (0.9 + random() * 0.1));
+      }
+    }
+    c.putImageData(img, 0, 0);
+    const make = (canvas: HTMLCanvasElement, srgb: boolean) => {
+      const t = new THREE.CanvasTexture(canvas);
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+      return t;
+    };
+    return { map: make(colour, true), bump: make(bump, false) };
+  }, []);
+}
+
+// Above the snowline the path is a packed track in the snow: boot prints
+// down the middle, softer, blue-shadowed snow either side, no stones.
+function useSnowTrackTexture() {
+  return useMemo(() => {
+    const W = 256;
+    const H = 1024;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const c = canvas.getContext("2d")!;
+    const random = rng(19);
+    c.fillStyle = "#eef2f8";
+    c.fillRect(0, 0, W, H);
+    // Trodden snow is a touch greyer and glossier than fresh.
+    const trodden = c.createLinearGradient(0, 0, W, 0);
+    trodden.addColorStop(0.15, "rgba(150,165,195,0)");
+    trodden.addColorStop(0.35, "rgba(150,165,195,0.28)");
+    trodden.addColorStop(0.65, "rgba(150,165,195,0.28)");
+    trodden.addColorStop(0.85, "rgba(150,165,195,0)");
+    c.fillStyle = trodden;
+    c.fillRect(0, 0, W, H);
+    // Boot prints, left and right, each a shadowed hollow with a lit far lip.
+    let y = 10;
+    let left = true;
+    while (y < H - 30) {
+      const x = W / 2 + (left ? -22 : 22) + (random() - 0.5) * 10;
+      const turn = (random() - 0.5) * 0.25;
+      c.save();
+      c.translate(x, y);
+      c.rotate(turn);
+      c.fillStyle = "rgba(96,116,160,0.45)";
+      c.beginPath();
+      c.ellipse(0, 0, 10, 30, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "rgba(255,255,255,0.7)";
+      c.beginPath();
+      c.ellipse(0, -27, 9, 4, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "rgba(120,140,180,0.35)";
+      for (let k = -22; k < 26; k += 7) c.fillRect(-7, k, 14, 2);
+      c.restore();
+      // A stride of about 0.7 m at ~200 px a metre down the strip.
+      y += 130 + random() * 20;
+      left = !left;
+    }
+    // Sparkle.
+    for (let i = 0; i < 1800; i += 1) {
+      c.fillStyle = `rgba(255,255,255,${0.4 + random() * 0.6})`;
+      c.fillRect(random() * W, random() * H, 1, 1);
+    }
+    // Soft edges into the fresh snow either side.
+    const img = c.getImageData(0, 0, W, H);
+    for (let yy = 0; yy < H; yy += 1) {
+      const l = 40 + Math.sin(yy * 0.02) * 8;
+      const r = W - 40 + Math.sin(yy * 0.017 + 2) * 8;
+      for (let x = 0; x < W; x += 1) {
+        const d = Math.min(x - l, r - x);
+        img.data[(yy * W + x) * 4 + 3] = Math.round(255 * Math.max(0, Math.min(1, (d + 24) / 48)));
+      }
+    }
+    c.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(canvas);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  }, []);
+}
+
+function Trail() {
+  const { map, bump } = useTrailTextures();
+  const snowMap = useSnowTrackTexture();
+  const geometry = useMemo(() => {
+    const N = 900;
+    const across = 7;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const index: number[] = [];
+    let walked = 0;
+    let prev = trailPoint(0);
+    for (let i = 0; i < N; i += 1) {
+      const s = i / (N - 1);
+      const p = trailPoint(s);
+      const q = trailPoint(Math.min(1, s + 0.002));
+      walked += Math.hypot(p[0] - prev[0], p[2] - prev[2]);
+      prev = p;
+      const len = Math.hypot(q[0] - p[0], q[2] - p[2]) || 1;
+      const rx = -(q[2] - p[2]) / len;
+      const rz = (q[0] - p[0]) / len;
+      // Wider where it's easy going, narrower where it squeezes past rock.
+      const width = 1.9 + Math.sin(walked * 0.21) * 0.3 + Math.sin(walked * 0.83 + 1) * 0.15;
+      for (let k = 0; k < across; k += 1) {
+        const o = (k / (across - 1) - 0.5) * width;
+        const x = p[0] + rx * o;
+        const z = p[2] + rz * o;
+        const y = heightAt(x, z);
+        positions.push(x, y + 0.03, z);
+        uvs.push(k / (across - 1), walked / 5);
+        // Earth below the snowline, fading out as the snow track fades in
+        // (the alpha here is the earth's; the snow mesh uses its inverse).
+        const snow = THREE.MathUtils.smoothstep(y, 17, 21);
+        colors.push(1.2, 1.15, 1.05, 1 - snow);
+      }
+      if (i) {
+        for (let k = 0; k < across - 1; k += 1) {
+          const a = (i - 1) * across + k;
+          const b = i * across + k;
+          // Wound to face up, so it shows from above (and lights correctly).
+          index.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+    g.setIndex(index);
+    g.computeVertexNormals();
+    // The snow track: the same strip, its alpha the inverse of the earth's.
+    const snowy = g.clone();
+    const col = snowy.attributes.color as THREE.BufferAttribute;
+    for (let i = 0; i < col.count; i += 1) col.setXYZW(i, 1, 1, 1, 1 - col.getW(i));
+    return { earth: g, snow: snowy };
+  }, []);
+  useEffect(() => () => { geometry.earth.dispose(); geometry.snow.dispose(); map.dispose(); bump.dispose(); snowMap.dispose(); }, [geometry, map, bump, snowMap]);
+  return (
+    <>
+      <mesh geometry={geometry.earth} receiveShadow>
+        <meshStandardMaterial map={map} bumpMap={bump} bumpScale={1.2} vertexColors transparent depthWrite={false} polygonOffset polygonOffsetFactor={-1} roughness={0.95} />
+      </mesh>
+      <mesh geometry={geometry.snow} receiveShadow>
+        <meshStandardMaterial map={snowMap} vertexColors transparent depthWrite={false} polygonOffset polygonOffsetFactor={-2} roughness={0.7} />
+      </mesh>
+    </>
+  );
+}
+
+// Stones scattered along both edges, and grass tufts on the lower slopes.
+// A tuft of mountain grass: a dozen thin blades arching out from one root,
+// darker at the base, sun-bleached at the tips.
+function useTuftGeometry() {
+  return useMemo(() => {
+    const random = rng(23);
+    const positions: number[] = [];
+    const colours: number[] = [];
+    const base = new THREE.Color("#2f3d1f");
+    const tip = new THREE.Color("#9aa463");
+    for (let k = 0; k < 12; k += 1) {
+      const turn = random() * Math.PI * 2;
+      const lean = 0.25 + random() * 0.55;
+      const h = 0.18 + random() * 0.22;
+      const w = 0.012 + random() * 0.01;
+      const dx = Math.cos(turn);
+      const dz = Math.sin(turn);
+      // Three segments per blade, bending further out as it rises.
+      const pts: THREE.Vector3[] = [];
+      for (let j = 0; j <= 3; j += 1) {
+        const t = j / 3;
+        const out = Math.sin(lean) * h * t * t * 1.2;
+        pts.push(new THREE.Vector3(dx * out, h * t * Math.cos(lean * t), dz * out));
+      }
+      for (let j = 0; j < 3; j += 1) {
+        const a = pts[j];
+        const b = pts[j + 1];
+        const wa = w * (1 - j / 3);
+        const wb = w * (1 - (j + 1) / 3);
+        const sx = -dz;
+        const sz = dx;
+        const quad = [
+          [a.x - sx * wa, a.y, a.z - sz * wa], [a.x + sx * wa, a.y, a.z + sz * wa], [b.x + sx * wb, b.y, b.z + sz * wb],
+          [a.x - sx * wa, a.y, a.z - sz * wa], [b.x + sx * wb, b.y, b.z + sz * wb], [b.x - sx * wb, b.y, b.z - sz * wb],
+        ];
+        quad.forEach(([x, y, z]) => {
+          positions.push(x, y, z);
+          const c = base.clone().lerp(tip, Math.min(1, y / 0.32));
+          colours.push(c.r, c.g, c.b);
+        });
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
+    g.computeVertexNormals();
+    return g;
+  }, []);
+}
+
+function Verge() {
+  const tuftGeometry = useTuftGeometry();
+  const rocks = useRef<THREE.InstancedMesh>(null);
+  const grass = useRef<THREE.InstancedMesh>(null);
+  const { stones, tufts } = useMemo(() => {
+    const random = rng(77);
+    const stones: { x: number; y: number; z: number; s: number; r: number }[] = [];
+    const tufts: { x: number; y: number; z: number; s: number; r: number; tint: number }[] = [];
+    for (let i = 0; i < 1400; i += 1) {
+      const s = random();
+      const p = trailPoint(s);
+      const q = trailPoint(Math.min(1, s + 0.002));
+      const len = Math.hypot(q[0] - p[0], q[2] - p[2]) || 1;
+      const side = (random() > 0.5 ? 1 : -1) * (0.85 + random() * 2.4);
+      const x = p[0] - ((q[2] - p[2]) / len) * side;
+      const z = p[2] + ((q[0] - p[0]) / len) * side;
+      const y = heightAt(x, z);
+      if ((nearTrail(x, z)?.w ?? 0) > 0.05) continue; // keep camps clear
+      if (random() < 0.4) stones.push({ x, y, z, s: 0.06 + random() * random() * 0.5, r: random() * 6 });
+      else if (y < 17) for (let k = 0; k < 3; k += 1) tufts.push({ x: x + (random() - 0.5) * 0.5, y, z: z + (random() - 0.5) * 0.5, s: 0.5 + random() * 0.8, r: random() * 6, tint: random() });
+    }
+    return { stones, tufts };
+  }, []);
+
+  useEffect(() => {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const color = new THREE.Color();
+    if (rocks.current) {
+      stones.forEach((st, i) => {
+        q.setFromEuler(e.set(st.r, st.r * 1.7, st.r * 0.6));
+        m.compose(new THREE.Vector3(st.x, st.y + st.s * 0.3, st.z), q, new THREE.Vector3(st.s * 1.3, st.s * 0.8, st.s));
+        rocks.current!.setMatrixAt(i, m);
+        rocks.current!.setColorAt(i, color.setHSL(0.08, 0.05, 0.38 + (st.r % 1) * 0.2));
+      });
+      rocks.current.instanceMatrix.needsUpdate = true;
+      if (rocks.current.instanceColor) rocks.current.instanceColor.needsUpdate = true;
+    }
+    if (grass.current) {
+      tufts.forEach((t, i) => {
+        q.setFromEuler(e.set((t.tint - 0.5) * 0.2, t.r, (t.r % 1 - 0.5) * 0.2));
+        m.compose(new THREE.Vector3(t.x, t.y - 0.02, t.z), q, new THREE.Vector3(t.s, t.s * (0.8 + t.tint * 0.5), t.s));
+        grass.current!.setMatrixAt(i, m);
+        grass.current!.setColorAt(i, color.setRGB(0.85 + t.tint * 0.25, 0.9 + t.tint * 0.15, 0.8 + (1 - t.tint) * 0.15));
+      });
+      grass.current.instanceMatrix.needsUpdate = true;
+      if (grass.current.instanceColor) grass.current.instanceColor.needsUpdate = true;
+    }
+  }, [stones, tufts]);
+
+  return (
+    <>
+      <instancedMesh ref={rocks} args={[undefined, undefined, stones.length]} castShadow receiveShadow>
+        <dodecahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial roughness={0.95} flatShading />
+      </instancedMesh>
+      <instancedMesh ref={grass} args={[tuftGeometry, undefined, tufts.length]}>
+        <meshStandardMaterial roughness={1} side={THREE.DoubleSide} vertexColors />
+      </instancedMesh>
+    </>
+  );
+}
+
+/* ── Scene ──────────────────────────────────────────────────────────────── */
+
+function Ready({ onReady }: { onReady: () => void }) {
+  const fired = useRef(false);
+  useFrame(() => {
+    if (!fired.current) {
+      fired.current = true;
+      onReady();
+    }
+  });
+  return null;
+}
+
+function World({ projects, progress, playhead, night, reducedMotion, altitude, onReady }: Props) {
+  const places = useMemo(() => inscriptions(), []);
+
+  // Golden hour from the south-west, or a moonlit night.
+  const sun: [number, number, number] = night ? [-80, 90, -60] : SUN;
+  const haze = night ? "#0b1222" : "#dcc7b4";
+
+  return (
+    <>
+      <color attach="background" args={[haze]} />
+      <fogExp2 attach="fog" args={[haze, night ? 0.0042 : 0.0034]} />
+      {night ? (
+        <Stars radius={300} depth={80} count={5000} factor={5} saturation={0} fade speed={0.3} />
+      ) : (
+        <Sky distance={4500} sunPosition={sun} turbidity={6} rayleigh={2} mieCoefficient={0.0035} mieDirectionalG={0.8} />
+      )}
+      <hemisphereLight args={[night ? "#5a6fa6" : "#b8c9ea", night ? "#0b0d14" : "#5b4630", night ? 0.45 : 0.75]} />
+      <directionalLight
+        position={sun}
+        intensity={night ? 0.9 : 3.4}
+        color={night ? "#a8bcff" : "#ffe6c8"}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-WORLD / 2}
+        shadow-camera-right={WORLD / 2}
+        shadow-camera-top={WORLD / 2}
+        shadow-camera-bottom={-WORLD / 2}
+        shadow-camera-near={1}
+        shadow-camera-far={600}
+        shadow-bias={-0.0005}
+        shadow-normalBias={0.4}
+      />
+
+      <Terrain />
+      <Trees />
+      <Water night={night} />
+      <Clouds night={night} shots={STOP_SHOTS} />
+      <Trail />
+      <Verge />
+
+      {CHAPTERS.map((chapter, i) => {
+        const at = places[i];
+        if (at.kind === "arch") return <Arch key={chapter.key} chapter={chapter} at={at} projects={projects} />;
+        if (at.kind === "face" || at.kind === "far")
+          return (
+            <group key={chapter.key}>
+              <Inscribed chapter={chapter} at={at} projects={projects} />
+              {chapter.key === "projects" && <WallFlags at={at} panel={panelFor(chapter, projects)} projects={projects} />}
+            </group>
+          );
+        if (at.kind === "banner") return <SummitFlag key={chapter.key} at={at} chapter={chapter} projects={projects} />;
+        if (at.kind === "snow") return <Inscribed key={chapter.key} chapter={chapter} at={at} projects={projects} />;
+        return <Stone key={chapter.key} chapter={chapter} at={at} projects={projects} />;
+      })}
+
+      <Flight progress={progress} playhead={playhead} reducedMotion={reducedMotion} altitude={altitude} />
+
+      <EffectComposer multisampling={0}>
+        <Bloom mipmapBlur luminanceThreshold={0.9} luminanceSmoothing={0.2} intensity={night ? 1.1 : 0.7} />
+        <Noise premultiply blendFunction={BlendFunction.SOFT_LIGHT} opacity={0.35} />
+        <Vignette eskil={false} offset={0.22} darkness={0.62} />
+      </EffectComposer>
+      <Ready onReady={onReady} />
+    </>
+  );
+}
+
+export default function ExploreScene(props: Props) {
+  return (
+    <Canvas
+      className="xp-canvas"
+      shadows
+      dpr={[1, 1.6]}
+      gl={{ antialias: true, powerPreference: "high-performance" }}
+      camera={{ fov: 50, near: 0.05, far: 1500, position: STOP_SHOTS[0].pos }}
+      eventSource={props.eventRoot as RefObject<HTMLElement> | undefined}
+      eventPrefix="client"
+      fallback={<p className="xp-nogl">This view needs WebGL, which your browser has turned off.</p>}
+    >
+      <World {...props} />
+    </Canvas>
+  );
+}
