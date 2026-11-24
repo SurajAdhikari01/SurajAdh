@@ -660,16 +660,41 @@ export function cameraAt(progress: number): Shot {
   const from = INSCRIPTIONS[i];
   const to = INSCRIPTIONS[i + 1];
 
-  const move = smooth(0.12, 0.84, t);
+  // Mostly linear, so every bit of scroll moves the climber, easing only a
+  // little into and out of each stop rather than standing still there.
+  const move = lerp(t, smooth(0, 1, t), 0.45);
   // The last leg ends at the summit flag: turn onto it gradually while climbing.
   const finale = i + 1 === last;
   const s = lerp(stopS(CHAPTERS[i]), stopS(CHAPTERS[i + 1]), move);
   const pos = eyeAt(s);
-  // Look well up the trail, above the slope right in front.
-  const ahead = trailPoint(Math.min(1, s + 0.035));
+  // Look the way the trail is heading, as a walker does, rising with it.
+  // Not at a fixed point further along: where the path curls round a slope,
+  // the straight line to that point runs through the hillside.
+  const here = trailPoint(s);
+  const next = trailPoint(Math.min(1, s + 0.01));
+  const run = Math.hypot(next[0] - here[0], next[2] - here[2]) || 1;
+  const climb = (next[1] - here[1]) / run;
+  const reachAhead = 9.4;
+  const ahead: Vec3 = [
+    pos[0] + ((next[0] - here[0]) / run) * reachAhead,
+    here[1] + climb * reachAhead * 0.5,
+    pos[2] + ((next[2] - here[2]) / run) * reachAhead,
+  ];
   let target: Vec3 = [ahead[0], ahead[1] + EYE * 1.1, ahead[2]];
-  const out = 1 - smooth(0.04, 0.3, t);
-  const into = finale ? smooth(0.35, 0.95, t) : smooth(0.8, 1, t);
+  // Leaving Camp II, turn off the wall and onto the path within a few steps.
+  let out = finale ? 1 - smooth(0.01, 0.1, t) : 1 - smooth(0.04, 0.3, t);
+  if (from.kind === "arch") {
+    // Walking on through the arch: let go of it as the climber reaches it,
+    // so the view turns to the trail ahead instead of back at the arch.
+    const fx = ahead[0] - pos[0];
+    const fz = ahead[2] - pos[2];
+    const lx = from.center[0] - pos[0];
+    const lz = from.center[2] - pos[2];
+    const along = (fx * lx + fz * lz) / ((Math.hypot(fx, fz) || 1) * (Math.hypot(lx, lz) || 1));
+    // And by distance, so the gaze has come level before it is under the arch.
+    out *= smooth(0.55, 0.95, along) * smooth(3, 6.2, Math.hypot(lx, lz));
+  }
+  const into = finale ? smooth(0.35, 0.95, t) : smooth(0.72, 1, t);
   target = lerp3(target, from.look, out);
   target = lerp3(target, to.look, into);
   const main = out >= into ? from : to;
@@ -686,6 +711,20 @@ function spanOf(at: Inscription) {
 }
 
 export const STOP_SHOTS: Shot[] = CHAPTERS.map((_, i) => cameraAt(i));
+
+/** How far the climber walks on each leg, stop to stop, in metres. */
+export const LEG_METRES: number[] = CHAPTERS.slice(0, -1).map((c, i) => {
+  const a = stopS(c);
+  const b = stopS(CHAPTERS[i + 1]);
+  let total = 0;
+  let prev = trailPoint(a);
+  for (let k = 1; k <= 60; k += 1) {
+    const p = trailPoint(a + ((b - a) * k) / 60);
+    total += Math.hypot(p[0] - prev[0], p[1] - prev[1], p[2] - prev[2]);
+    prev = p;
+  }
+  return total;
+});
 
 /** Seeded random numbers, so trees grow in the same places every visit. */
 export function rng(seed: number) {

@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowLeft, ArrowUpRight, Moon, Sun } from "lucide-react";
-import { CHAPTERS, STATIONS } from "./world";
+import { CHAPTERS, LEG_METRES, STATIONS } from "./world";
 import type { Chapter, ExploreProject } from "./world";
 import { panelFor } from "./content";
 
@@ -20,6 +20,11 @@ const Scene = dynamic(() => import("./scene"), { ssr: false });
  */
 
 const ease = [0.22, 1, 0.36, 1] as const;
+
+// Each leg's share of the page follows how far the trail runs, so a flick of
+// the wheel always covers about the same ground: no stretch races past while
+// another crawls.
+const LEG_VH = LEG_METRES.map((m) => Math.round(Math.min(200, Math.max(80, m * 1.4))));
 
 function chapterLabel(chapter: Chapter) {
   return chapter.kind === "intro" ? "Valley" : STATIONS.find((s) => s.id === chapter.id)!.name;
@@ -79,11 +84,23 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
 
   const onReady = useCallback(() => setReady(true), []);
 
+  const sections = useRef<(HTMLElement | null)[]>([]);
+  // Where the page is, in chapters: the stop it last passed plus how far it
+  // is along the leg to the next one.
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
-    progress.current = el.scrollTop / el.clientHeight;
-    const next = Math.round(progress.current);
+    const top = el.scrollTop;
+    const tops = sections.current.map((s) => s?.offsetTop ?? 0);
+    let p = CHAPTERS.length - 1;
+    for (let i = 0; i < tops.length - 1; i += 1) {
+      if (top < tops[i + 1]) {
+        p = i + Math.max(0, top - tops[i]) / Math.max(1, tops[i + 1] - tops[i]);
+        break;
+      }
+    }
+    progress.current = p;
+    const next = Math.round(p);
     setActive((prev) => (prev === next ? prev : next));
   }, []);
 
@@ -102,7 +119,7 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
   const jump = useCallback((index: number) => {
     const el = scroller.current;
     if (!el) return;
-    el.scrollTo({ top: index * el.clientHeight, behavior: reducedMotion ? "auto" : "smooth" });
+    el.scrollTo({ top: sections.current[index]?.offsetTop ?? 0, behavior: reducedMotion ? "auto" : "smooth" });
   }, [reducedMotion]);
 
   const toggleNight = () => {
@@ -134,7 +151,13 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
           const panel = panels[i];
           const Heading = i === 0 ? "h1" : "h2";
           return (
-            <section key={chapter.key} className="xp-chapter" aria-label={chapterLabel(chapter)}>
+            <section
+              key={chapter.key}
+              ref={(el) => { sections.current[i] = el; }}
+              className="xp-chapter"
+              style={i < LEG_VH.length ? { height: `${LEG_VH[i]}dvh` } : undefined}
+              aria-label={chapterLabel(chapter)}
+            >
               <div className="sr-only">
                 <p>{panel.kicker}</p>
                 <Heading>{panel.title.map((line) => line.map((seg) => seg.t).join("")).join(" ")}</Heading>

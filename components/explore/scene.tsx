@@ -97,8 +97,16 @@ const TERRAIN_COLOR = /* glsl */ `
   float broad = xpFbm3(vWPos.xz * 0.07);
   // Fine grain and bump only up close: further off they are smaller than a
   // pixel, so skipping them saves most of the shader and some shimmer.
-  float nearby = 1.0 - smoothstep(55.0, 85.0, distance(vWPos, cameraPosition));
-  float fine = nearby > 0.0 ? mix(xpFbm3(vWPos.xz * 0.9), xpFbm(vWPos.xz * 0.9), nearby) : xpFbm3(vWPos.xz * 0.9);
+  float camDist = distance(vWPos, cameraPosition);
+  float nearby = 1.0 - smoothstep(55.0, 85.0, camDist);
+  // Seen from above, the grain is laid on the ground; on steep faces it is
+  // laid from the side as well, blended by which way the face looks, so it
+  // never smears into vertical streaks.
+  vec3 tw = pow(abs(wn), vec3(4.0));
+  tw /= tw.x + tw.y + tw.z;
+  float topFine = nearby > 0.0 ? mix(xpFbm3(vWPos.xz * 0.9), xpFbm(vWPos.xz * 0.9), nearby) : xpFbm3(vWPos.xz * 0.9);
+  float fine = topFine;
+  if (tw.y < 0.97) fine = topFine * tw.y + xpFbm3(vWPos.zy * 0.9 + 17.0) * tw.x + xpFbm3(vWPos.xy * 0.9 + 31.0) * tw.z;
 
   vec3 meadow = vec3(0.36, 0.45, 0.24);
   vec3 forest = vec3(0.19, 0.29, 0.17);
@@ -126,6 +134,14 @@ const TERRAIN_COLOR = /* glsl */ `
   snowAmt = max(snowAmt, smoothstep(snowline + 9.0, snowline + 15.0, h) * smoothstep(0.04, 0.26, level + (fine - 0.5) * 0.15) * 0.94);
   col = mix(col, snowC * (0.93 + fine * 0.07), snowAmt);
   col = mix(shore, col, smoothstep(${(WATER + 0.2).toFixed(2)}, ${(WATER + 1.2).toFixed(2)}, h));
+
+  // Close up, a fine grit so the ground never turns to soft blobs.
+  float closeUp = 1.0 - smoothstep(8.0, 22.0, camDist);
+  if (closeUp > 0.0) {
+    float g7 = xpNoise(vWPos.xz * 7.0) * tw.y + xpNoise(vWPos.zy * 7.0) * tw.x + xpNoise(vWPos.xy * 7.0) * tw.z;
+    float g19 = xpNoise(vWPos.xz * 19.0) * tw.y + xpNoise(vWPos.zy * 19.0) * tw.x + xpNoise(vWPos.xy * 19.0) * tw.z;
+    col *= 1.0 + ((g7 - 0.5) * 0.22 + (g19 - 0.5) * 0.12) * closeUp;
+  }
 
   diffuseColor.rgb = pow(col, vec3(2.2));
 `;
@@ -156,7 +172,8 @@ function useTerrainMaterial() {
             float b0 = xpFbm3(bp);
             float bx = xpFbm3(bp + vec2(e, 0.0));
             float bz = xpFbm3(bp + vec2(0.0, e));
-            vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9 * nearby;
+            // Bump from above only, faded out on steep faces where it would streak.
+            vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9 * nearby * smoothstep(0.75, 0.95, tw.y);
             normal = normalize(normal + (viewMatrix * vec4(bump, 0.0)).xyz);
           }`,
         );
@@ -1238,17 +1255,28 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
     const start = onWall(-1.45, -0.98, 0.1);
     const end = onWall(1.45, -0.98, 0.1);
     const sag = 0.16;
-    const along = (t: number) => {
+    // A rope can only sag straight down, so it hangs in one upright plane,
+    // set just far enough out from the rock that no part of it, or of the
+    // flags below it, touches the face. Two poles hold its ends there, each
+    // guyed back to a piton in the wall.
+    const out = new THREE.Vector3(-ahead.x, 0, -ahead.z).normalize();
+    const base = (t: number) => {
       const p = start.clone().lerp(end, t);
       p.y -= Math.sin(t * Math.PI) * sag;
-      const dir = p.clone().sub(eye).normalize();
-      const hit = castToGround(at.eye, [dir.x, dir.y, dir.z], dist * 2.5);
-      if (hit) {
-        const wall = new THREE.Vector3(...hit).distanceTo(eye);
-        if (p.distanceTo(eye) > wall - 1) p.copy(eye).addScaledVector(dir, wall - 1);
-      }
       return p;
     };
+    const gapAt = (p: THREE.Vector3) => {
+      const from = p.clone().addScaledVector(out, 3);
+      const hit = castToGround([from.x, from.y, from.z], [-out.x, -out.y, -out.z], 8);
+      return hit ? from.distanceTo(new THREE.Vector3(...hit)) - 3 : Infinity;
+    };
+    let reach = 0.3;
+    for (let k = 0; k <= 20; k += 1) {
+      const p = base(k / 20);
+      reach = Math.max(reach, 0.4 - gapAt(p), 0.25 - gapAt(p.clone().add(new THREE.Vector3(0, -0.6, 0))));
+    }
+    reach = Math.min(1.6, reach);
+    const along = (t: number) => base(t).addScaledVector(out, reach);
     const points = Array.from({ length: 41 }, (_, i) => along(i / 40));
     // Flags all of a size, a little apart, the projects in the middle.
     const plain = 1;
@@ -1271,29 +1299,13 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
     // The breeze comes along the wall and a little off it, toward the climber.
     const wind = right.clone().multiplyScalar(1.1).addScaledVector(ahead, -0.45).add(new THREE.Vector3(0, 0.15, 0));
 
-    // The wall sits in shade, so the rope and flags darken the rock below
-    // them in the light from the sky overhead, tying them to the face.
-    const toSun = ahead.clone().add(new THREE.Vector3(0, -0.85, 0)).normalize();
-    const cast = (p: THREE.Vector3) => {
-      const hit = castToGround([p.x, p.y, p.z], [toSun.x, toSun.y, toSun.z], 8);
-      if (!hit) return null;
-      // Lift it off the true surface by enough to clear the coarser mesh,
-      // but never past halfway back to what casts it.
-      const w = new THREE.Vector3(...hit);
-      return w.addScaledVector(toSun, -Math.min(0.3, w.distanceTo(p) * 0.5));
-    };
-    const shadowRope = points.map(cast).filter((p): p is THREE.Vector3 => !!p);
     const flagH = cloth * (400 / 512);
-    const shadowFlags = flags
-      .map((f) => {
-        const c = cast(f.pin(0.5).add(new THREE.Vector3(0, -flagH * 0.55, 0)));
-        return c && { at: c, key: f.key };
-      })
-      .filter((f): f is { at: THREE.Vector3; key: string } => !!f);
     const facing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), ahead.clone().negate());
 
     // The rope is a real cord; its loose ends hang below each knot.
-    const ropeTube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([pitonL, ...points, pitonR]), 160, 0.022, 6);
+    const ropeCurve = new THREE.CatmullRomCurve3(points);
+    const ropeTube = new THREE.TubeGeometry(ropeCurve, 200, 0.016, 7);
+    const ropeLength = ropeCurve.getLength();
     const tail = (from: THREE.Vector3, side: number) =>
       new THREE.TubeGeometry(
         new THREE.CatmullRomCurve3([
@@ -1306,7 +1318,6 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
         0.013,
         5,
       );
-    const shadowTube = shadowRope.length > 4 ? new THREE.TubeGeometry(new THREE.CatmullRomCurve3(shadowRope), 160, 0.05, 4) : null;
     return {
       points,
       flags,
@@ -1314,29 +1325,55 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
       flagH,
       wind,
       pitons: [pitonL, pitonR],
+      // Each pole: from the ground up to just above where the rope is tied.
+      poles: [points[0], points[points.length - 1]].map((top) => {
+        const foot = heightAt(top.x, top.z) - 0.3;
+        const tip = top.y + 0.22;
+        return { at: new THREE.Vector3(top.x, (foot + tip) / 2, top.z), length: tip - foot, top };
+      }),
+      guys: [
+        new THREE.TubeGeometry(new THREE.LineCurve3(points[0].clone().add(new THREE.Vector3(0, 0.15, 0)), pitonL), 1, 0.008, 5),
+        new THREE.TubeGeometry(new THREE.LineCurve3(points[points.length - 1].clone().add(new THREE.Vector3(0, 0.15, 0)), pitonR), 1, 0.008, 5),
+      ],
       facing,
       ropeTube,
-      tails: [tail(pitonL, -1), tail(pitonR, 1)],
-      shadowTube,
-      shadowFlags,
+      ropeLength,
+      tails: [tail(points[0], -1), tail(points[points.length - 1], 1)],
     };
   }, [at, panel, projects]);
   useEffect(() => () => {
     rig.ropeTube.dispose();
     rig.tails.forEach((t) => t.dispose());
-    rig.shadowTube?.dispose();
+    rig.guys.forEach((t) => t.dispose());
   }, [rig]);
-  const shade = useMemo(() => {
+  // Twisted cord: diagonal strands wound round the rope, so it reads as rope
+  // and not a smooth pipe.
+  const cord = useMemo(() => {
     const c = document.createElement("canvas");
-    c.width = c.height = 64;
+    c.width = 32;
+    c.height = 32;
     const ctx = c.getContext("2d")!;
-    ctx.filter = "blur(7px)";
-    ctx.fillStyle = "#000";
-    ctx.fillRect(14, 14, 36, 36);
+    ctx.fillStyle = "#cdbf9f";
+    ctx.fillRect(0, 0, 32, 32);
+    ctx.strokeStyle = "#8f7f62";
+    ctx.lineWidth = 5;
+    for (let k = -2; k < 3; k += 1) {
+      ctx.beginPath();
+      ctx.moveTo(k * 16, 0);
+      ctx.lineTo(k * 16 + 32, 32);
+      ctx.stroke();
+    }
     const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
   }, []);
-  useEffect(() => () => shade.dispose(), [shade]);
+  useEffect(() => {
+    // One twist every few centimetres along the rope's real length.
+    cord.repeat.set(rig.ropeLength / 0.035, 1);
+    cord.needsUpdate = true;
+  }, [cord, rig.ropeLength]);
+  useEffect(() => () => cord.dispose(), [cord]);
   const textures = useMemo(
     () => rig.flags.map((f) => paintFlag(f.project?.name ?? "", f.project?.language ?? null, f.colour)),
     [rig],
@@ -1345,40 +1382,39 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
   return (
     <>
       <mesh geometry={rig.ropeTube}>
-        <meshStandardMaterial color="#d8cdb8" roughness={1} />
+        <meshStandardMaterial map={cord} roughness={1} />
       </mesh>
       {rig.tails.map((t, i) => (
         <mesh key={i} geometry={t}>
-          <meshStandardMaterial color="#d8cdb8" roughness={1} />
+          <meshStandardMaterial color="#bfb091" roughness={1} />
         </mesh>
       ))}
       {rig.pitons.map((p, i) => (
         <group key={i} position={p} quaternion={rig.facing}>
-          {/* The eye of the piton, and the knot cinched through it. */}
+          {/* The eye of the piton the guy line is tied through. */}
           <mesh>
-            <torusGeometry args={[0.055, 0.014, 6, 14]} />
+            <torusGeometry args={[0.045, 0.012, 6, 14]} />
             <meshStandardMaterial color="#4a4744" metalness={0.7} roughness={0.45} />
-          </mesh>
-          <mesh position={[0, -0.05, 0.01]} scale={[0.07, 0.06, 0.06]}>
-            <sphereGeometry args={[1, 10, 8]} />
-            <meshStandardMaterial color="#cfc3ad" roughness={1} />
-          </mesh>
-          <mesh position={[0, 0.04, -0.02]} scale={[0.09, 0.09, 1]}>
-            <circleGeometry args={[1, 12]} />
-            <meshBasicMaterial color="#000" transparent opacity={0.35} depthWrite={false} />
           </mesh>
         </group>
       ))}
-      {rig.shadowTube && (
-        <mesh geometry={rig.shadowTube} renderOrder={1}>
-          <meshBasicMaterial color="#000" transparent opacity={0.35} depthWrite={false} />
+      {rig.guys.map((g, i) => (
+        <mesh key={i} geometry={g}>
+          <meshStandardMaterial color="#bfb091" roughness={1} />
         </mesh>
-      )}
-      {rig.shadowFlags.map((f) => (
-        <mesh key={f.key} position={f.at} quaternion={rig.facing} renderOrder={1}>
-          <planeGeometry args={[rig.cloth * 1.4, rig.flagH * 1.4]} />
-          <meshBasicMaterial map={shade} transparent opacity={0.4} depthWrite={false} />
-        </mesh>
+      ))}
+      {rig.poles.map((pole, i) => (
+        <group key={i}>
+          {/* A plain wooden pole, with the rope knotted round its top. */}
+          <mesh position={pole.at} castShadow>
+            <cylinderGeometry args={[0.03, 0.04, pole.length, 8]} />
+            <meshStandardMaterial color="#6b5137" roughness={0.9} />
+          </mesh>
+          <mesh position={pole.top} scale={[0.06, 0.05, 0.06]}>
+            <sphereGeometry args={[1, 10, 8]} />
+            <meshStandardMaterial color="#cfc3ad" roughness={1} />
+          </mesh>
+        </group>
       ))}
       {rig.flags.map((f, i) => (
         <Cloth
@@ -1547,11 +1583,10 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
     const goal = progress.current ?? 0;
     if (reducedMotion) state.head = goal;
     else {
-      // Glide after the scroll: close behind it while scrolling, easing to a
-      // stop wherever the reader stops, never lurching across many stops.
-      const step = THREE.MathUtils.damp(state.head, goal, 3.2, dt) - state.head;
-      const cap = 1.6 * dt;
-      state.head += Math.sign(step) * Math.min(Math.abs(step), cap);
+      // Follow the scroll closely: just enough easing to smooth out the steps
+      // of a mouse wheel, and no speed limit or long glide, so the climb stops
+      // when the reader stops and always goes as far as they scrolled.
+      state.head = THREE.MathUtils.damp(state.head, goal, 9, dt);
       if (Math.abs(goal - state.head) < 1e-4) state.head = goal;
     }
     playhead.current = state.head;
@@ -1593,7 +1628,19 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
       state.wantTarget.y -= state.sway.y * reach * 0.05;
     }
 
-    const k = reducedMotion ? 1 : 1 - Math.exp(-dt * 10);
+    // Never stare into rock a few steps away: if the slope close by blocks the
+    // view well short of what the camera is aiming at, raise the gaze until it
+    // clears. (When the rock is what it aims at, as at a stop, leave it be.)
+    for (let k = 0; k < 6; k += 1) {
+      const aim = state.wantTarget.distanceTo(state.wantPos);
+      state.look.subVectors(state.wantTarget, state.wantPos).normalize();
+      const hit = castToGround([state.wantPos.x, state.wantPos.y, state.wantPos.z], [state.look.x, state.look.y, state.look.z], Math.min(7, aim * 0.7));
+      // Never more than a gentle upward glance.
+      if (!hit || state.look.y > 0.3) break;
+      state.wantTarget.y += (0.8 * aim) / 9;
+    }
+
+    const k = reducedMotion ? 1 : 1 - Math.exp(-dt * 18);
     state.pos.lerp(state.wantPos, k);
     state.target.lerp(state.wantTarget, k);
     // Smoothing cuts corners on the switchbacks: never let it cut into rock.

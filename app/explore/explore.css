@@ -20,8 +20,9 @@
 .xp-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse 80% 75% at 50% 50%, transparent 55%, #0c0a1066 100%), linear-gradient(180deg, #0c0a1040 0%, transparent 18%, transparent 82%, #0c0a1059 100%); }
 
 /* ── The page ── */
-.xp-scroll { position: absolute; inset: 0; z-index: 2; overflow-y: auto; overscroll-behavior: none; scrollbar-width: none; outline: none; }
-.xp-scroll::-webkit-scrollbar { display: none; }
+.xp-scroll { position: absolute; inset: 0; z-index: 2; overflow-y: auto; overscroll-behavior: none; outline: none; scrollbar-width: thin; scrollbar-color: #ffffff59 transparent; }
+.xp-scroll::-webkit-scrollbar { width: 6px; }
+.xp-scroll::-webkit-scrollbar-thumb { background: #ffffff59; border-radius: 3px; }
 .xp-chapter { height: 100dvh; }
 .xp-actions { position: absolute; z-index: 3; bottom: 52px; left: clamp(1.25rem, 6vw, 6rem); display: flex; max-width: calc(100vw - 2.5rem); flex-wrap: wrap; gap: .5rem; }
 .xp-cue { position: absolute; z-index: 3; bottom: 56px; left: 50%; display: flex; align-items: center; gap: .5rem; translate: -50% 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; text-shadow: 0 1px 8px #0009; pointer-events: none; }
