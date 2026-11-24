@@ -12,8 +12,14 @@ import { ImprovedNoise } from "three/examples/jsm/math/ImprovedNoise.js";
 export const WORLD = 280; // world units, edge to edge
 export const HALF = WORLD / 2;
 export const WATER = 1.4;
-/** Where the sun sits (by day): low in the south-west, at golden hour. */
+/** Where the sun's light comes from (by day): low in the south-west, at golden hour. */
 export const SUN: [number, number, number] = [-150, 34, 70];
+/**
+ * Where the sun itself shows in the sky: on the same side as its light, but
+ * swung round and set just over the far peaks, so from the summit it hangs
+ * in view beside the flag.
+ */
+export const SKY_SUN: [number, number, number] = [-138, 12, -96];
 
 export type StationId = "projects" | "stack" | "about" | "contact";
 

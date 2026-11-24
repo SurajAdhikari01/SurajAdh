@@ -11,6 +11,7 @@ import {
   ARCH,
   CHAPTERS,
   STOP_SHOTS,
+  SKY_SUN,
   SUN,
   WATER,
   WORLD,
@@ -2166,6 +2167,38 @@ function Ready({ onReady, night, staged }: { onReady: () => void; night: boolean
   return null;
 }
 
+// The sky at golden hour: the sun just over the far peaks, with a warm glow
+// around it. The scene is drawn without tone mapping, which would leave the
+// sky's bright light blown out to white, so the sky maps its own.
+function GoldenSky() {
+  const sky = useRef<THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>>(null);
+  useEffect(() => {
+    const m = sky.current?.material;
+    if (!m) return;
+    m.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <tonemapping_fragment>",
+        `{
+          vec3 x = gl_FragColor.rgb * 0.62;
+          vec3 c = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+          // Golden hour: amber light pooled round the low sun, a warm band
+          // along the horizon, and the sun's own disc.
+          float toSun = max(dot(direction, vSunDirection), 0.0);
+          float low = 1.0 - smoothstep(-0.02, 0.4, direction.y);
+          c = mix(c, vec3(1.0, 0.74, 0.46), low * 0.3);
+          c = mix(c, vec3(1.0, 0.6, 0.26), pow(toSun, 10.0) * 0.6 * (0.4 + 0.6 * low));
+          c = mix(c, vec3(1.0, 0.8, 0.5), pow(toSun, 120.0) * 0.7);
+          c = mix(c, vec3(1.0, 0.93, 0.74), smoothstep(0.99935, 0.99955, toSun));
+          gl_FragColor.rgb = c;
+        }
+        #include <tonemapping_fragment>`,
+      );
+    };
+    m.needsUpdate = true;
+  }, []);
+  return <Sky ref={sky} distance={4500} sunPosition={SKY_SUN} turbidity={9} rayleigh={2.4} mieCoefficient={0.007} mieDirectionalG={0.9} />;
+}
+
 function World({ projects, progress, playhead, night, reducedMotion, altitude, onReady }: Props) {
   const places = useMemo(() => inscriptions(), []);
   const panels = useMemo(() => CHAPTERS.map((c) => panelFor(c, projects)), [projects]);
@@ -2186,6 +2219,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
 
   // Golden hour from the south-west, or a moonlit night.
   const sun: [number, number, number] = night ? [-80, 90, -60] : SUN;
+
   const haze = night ? "#0b1222" : "#dcc7b4";
 
   return (
@@ -2195,7 +2229,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
       {night ? (
         <Stars radius={300} depth={80} count={5000} factor={5} saturation={0} fade speed={0.3} />
       ) : (
-        <Sky distance={4500} sunPosition={sun} turbidity={6} rayleigh={2} mieCoefficient={0.0035} mieDirectionalG={0.8} />
+        <GoldenSky />
       )}
       <hemisphereLight args={[night ? "#5a6fa6" : "#b8c9ea", night ? "#0b0d14" : "#5b4630", night ? 0.45 : 0.75]} />
       <directionalLight
