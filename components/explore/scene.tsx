@@ -50,7 +50,7 @@ const GRID = 416;
 const CHUNKS = 8;
 const CELLS = GRID / CHUNKS;
 const LOD_STEPS = [1, 2, 4];
-const LOD_FROM = [0, 70, 160];
+const LOD_FROM = [0, 95, 190];
 const SKIRT = 4;
 
 // Rock weathering that depends only on position, so the corners that
@@ -287,10 +287,17 @@ function patchGeometry(f: Field, i0: number, j0: number, cells: number, step: nu
     nor.push(v.x, v.y, v.z);
   };
   for (let r = 0; r < m; r += 1) for (let c = 0; c < m; c += 1) put(i0 + c * step, j0 + r * step, 0);
+  // Split each square along whichever diagonal the ground follows: a fixed
+  // diagonal cuts across ridges and gullies and saws them into teeth.
   for (let r = 0; r < m - 1; r += 1)
     for (let c = 0; c < m - 1; c += 1) {
       const a = r * m + c;
-      idx.push(a, a + m, a + 1, a + 1, a + m, a + m + 1);
+      const ya = pos[a * 3 + 1];
+      const yb = pos[(a + 1) * 3 + 1];
+      const yc = pos[(a + m) * 3 + 1];
+      const yd = pos[(a + m + 1) * 3 + 1];
+      if (Math.abs(ya - yd) < Math.abs(yb - yc)) idx.push(a, a + m, a + m + 1, a, a + m + 1, a + 1);
+      else idx.push(a, a + m, a + 1, a + 1, a + m, a + m + 1);
     }
   if (skirt) {
     const rim: [number, number][] = [];
@@ -2204,6 +2211,8 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
         shadow-camera-near={1}
         shadow-camera-far={600}
         shadow-bias={-0.0005}
+        shadow-radius={8}
+        shadow-blurSamples={16}
         shadow-normalBias={0.4}
       />
 
@@ -2260,7 +2269,7 @@ export default function ExploreScene(props: Props) {
   return (
     <Canvas
       className="xp-canvas"
-      shadows={{ type: THREE.PCFShadowMap }}
+      shadows={{ type: THREE.VSMShadowMap }}
       dpr={dpr}
       // Straight to the screen: no post-processing passes, native
       // multisampling for clean edges, and colours left as painted. The
