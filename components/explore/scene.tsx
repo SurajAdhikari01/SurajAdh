@@ -27,7 +27,7 @@ import {
 } from "./world";
 import type { Chapter, ExploreProject, Inscription, Shot } from "./world";
 import { panelFor } from "./content";
-import { FAR_RED, farSize, graniteTexture, inscriptionSize, paintArch, paintBanner, paintFar, paintFlag, paintOnRock, paintSnow, paintStoneLetters } from "./painter";
+import { FAR_RED, farSize, graniteTexture, cliffTexture, inscriptionSize, paintArch, paintBanner, paintFar, paintFlag, paintOnRock, paintSnow, paintStoneLetters } from "./painter";
 
 type Props = {
   projects: ExploreProject[];
@@ -65,11 +65,43 @@ function weather(v: THREE.Vector3, amount: number, seed: number) {
 
 /* ── Terrain ────────────────────────────────────────────────────────────── */
 
+const ROCK_DETAIL = /* glsl */ `
+uniform sampler2D xpRock;
+// Real rock detail for steep faces: cracks, joints, grain, laid from the side
+// at two scales so the repeat never shows. Up close the fine scale softens,
+// so its grain never shows as squares. Returns (shade, relief height).
+// Read the rock, never sharper than minLod: up close its texels would
+// otherwise blow up into squares.
+float xpRockAt(vec2 uv, float minLod) {
+  vec2 dx = dFdx(uv) * 512.0;
+  vec2 dy = dFdy(uv) * 512.0;
+  float lod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+  return textureLod(xpRock, uv, max(lod, minLod)).r;
+}
+vec2 xpRockDetail(vec3 p, vec3 n, float dist) {
+  vec3 tw = pow(abs(n), vec3(4.0));
+  vec2 sw = vec2(tw.x, tw.z) / max(tw.x + tw.z, 1e-3);
+  float near = smoothstep(6.0, 30.0, dist);
+  float l1 = mix(1.2, 0.0, near);
+  float l2 = mix(2.2, 0.0, near);
+  float rk1 = xpRockAt(p.zy / 7.0, l1) * sw.x + xpRockAt(p.xy / 7.0, l1) * sw.y;
+  float rk2 = xpRockAt(p.zy / 23.0 + 0.37, l2) * sw.x + xpRockAt(p.xy / 23.0 + 0.61, l2) * sw.y;
+  float detail = 1.0 - smoothstep(110.0, 170.0, dist);
+  float lum = mix(1.0, rk1 * 2.0, mix(0.5, 0.9, near)) * mix(1.0, rk2 * 2.0, mix(0.35, 0.6, near));
+  // Relief from a blurred read of the same rock: cracks and broad shapes get
+  // depth, the fine grain doesn't.
+  float rb1 = xpRockAt(p.zy / 7.0, 3.0) * sw.x + xpRockAt(p.xy / 7.0, 3.0) * sw.y;
+  float rb2 = xpRockAt(p.zy / 23.0 + 0.37, 3.0) * sw.x + xpRockAt(p.xy / 23.0 + 0.61, 3.0) * sw.y;
+  return vec2(mix(1.0, lum, detail), (rb1 * 0.25 * near + rb2 * mix(0.12, 0.9, near)) * detail);
+}
+`;
+
 // Surface colour, snow, rock strata and fine bump, all per pixel, so the
 // ground holds up when the camera comes in close.
 const TERRAIN_COMMON = /* glsl */ `
 varying vec3 vWPos;
 varying vec3 vWNorm;
+${ROCK_DETAIL}
 float xpHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float xpNoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p);
@@ -121,9 +153,13 @@ const TERRAIN_COLOR = /* glsl */ `
   col = mix(col, rock, smoothstep(14.0, 21.0, h + broad * 5.0));
 
   // Steep faces: bare rock in bands, like bedding planes.
-  float strata = xpFbm3(vec2(vWPos.x * 0.04 + vWPos.z * 0.03, h * 0.8));
-  vec3 cliff = mix(darkRock, rock, smoothstep(0.25, 0.75, strata)) * (0.8 + fine * 0.4);
-  col = mix(col, cliff, smoothstep(0.3, 0.6, 1.0 - level));
+  float strata = xpFbm3(vec2(vWPos.x * 0.11 + vWPos.z * 0.09, h * 0.5 + broad * 3.0));
+  vec3 cliff = mix(mix(darkRock, rock, 0.35), rock, smoothstep(0.2, 0.8, strata)) * (0.8 + fine * 0.4);
+  float steep = smoothstep(0.3, 0.6, 1.0 - level);
+  vec2 rockLH = xpRockDetail(vWPos, wn, camDist);
+  cliff *= rockLH.x;
+  float rockH = rockLH.y * steep;
+  col = mix(col, cliff, steep);
 
   // Snow lies above a ragged line wherever the slope can hold it; higher up
   // it dusts even the steep faces.
@@ -133,6 +169,7 @@ const TERRAIN_COLOR = /* glsl */ `
   // Up high, snow plasters every face that isn't sheer.
   snowAmt = max(snowAmt, smoothstep(snowline + 9.0, snowline + 15.0, h) * smoothstep(0.04, 0.26, level + (fine - 0.5) * 0.15) * 0.94);
   col = mix(col, snowC * (0.93 + fine * 0.07), snowAmt);
+
   col = mix(shore, col, smoothstep(${(WATER + 0.2).toFixed(2)}, ${(WATER + 1.2).toFixed(2)}, h));
 
   // Close up, a fine grit so the ground never turns to soft blobs.
@@ -146,10 +183,17 @@ const TERRAIN_COLOR = /* glsl */ `
   diffuseColor.rgb = pow(col, vec3(2.2));
 `;
 
+// One rock texture for the mountain's faces and the paint on them.
+let ROCK: THREE.Texture | null = null;
+const sharedRock = () => (ROCK ??= cliffTexture());
+
 function useTerrainMaterial() {
   return useMemo(() => {
     const material = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+    const rockMap = sharedRock();
+    material.userData.rockMap = rockMap;
     material.onBeforeCompile = (shader) => {
+      shader.uniforms.xpRock = { value: rockMap };
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNorm;")
         .replace(
@@ -175,6 +219,16 @@ function useTerrainMaterial() {
             // Bump from above only, faded out on steep faces where it would streak.
             vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9 * nearby * smoothstep(0.75, 0.95, tw.y);
             normal = normalize(normal + (viewMatrix * vec4(bump, 0.0)).xyz);
+          }
+          {
+            // Relief from the rock detail, so cracks sink and their lips catch light.
+            vec2 dH = vec2(dFdx(rockH), dFdy(rockH)) * (1.0 - snowAmt);
+            vec3 sx = dFdx(-vViewPosition);
+            vec3 sy = dFdy(-vViewPosition);
+            vec3 r1 = cross(sy, normal);
+            vec3 r2 = cross(normal, sx);
+            float det = dot(sx, r1) * faceDirection;
+            normal = normalize(abs(det) * normal - sign(det) * (dH.x * r1 + dH.y * r2));
           }`,
         );
     };
@@ -906,7 +960,41 @@ function PrayerFlags({ a, b, guys = true }: { a: THREE.Vector3; b: THREE.Vector3
 
 // Across a valley, the haze still sits over the words, but only half as
 // thick as over bare rock, so they read through it as a cut face would.
-function thinFog(shader: { fragmentShader: string }) {
+function thinFog(shader: { fragmentShader: string; vertexShader: string; uniforms: Record<string, THREE.IUniform> }) {
+  // Paint soaks into the rock rather than lying on it: the same grain,
+  // cracks and relief as the face beneath show through the letters.
+  shader.uniforms.xpRock = { value: sharedRock() };
+  shader.vertexShader = shader.vertexShader
+    .replace("#include <common>", "#include <common>\nvarying vec3 vPaintPos;\nvarying vec3 vPaintNorm;")
+    .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvPaintPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvPaintNorm = normalize(mat3(modelMatrix) * objectNormal);");
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <common>", `#include <common>\nvarying vec3 vPaintPos;\nvarying vec3 vPaintNorm;\n${ROCK_DETAIL}`)
+    .replace(
+      "#include <map_fragment>",
+      `#include <map_fragment>
+      vec3 pn = normalize(vPaintNorm);
+      float paintSteep = smoothstep(0.3, 0.6, 1.0 - pn.y);
+      vec2 paintRock = xpRockDetail(vPaintPos, pn, distance(vPaintPos, cameraPosition));
+      float paintH = paintRock.y * paintSteep;
+      diffuseColor.rgb *= mix(1.0, paintRock.x, paintSteep * 0.85);`,
+    )
+    .replace(
+      "#include <normal_fragment_maps>",
+      `#include <normal_fragment_maps>
+      {
+        vec2 dH = vec2(dFdx(paintH), dFdy(paintH));
+        vec3 sx = dFdx(-vViewPosition);
+        vec3 sy = dFdy(-vViewPosition);
+        vec3 r1 = cross(sy, normal);
+        vec3 r2 = cross(normal, sx);
+        float det = dot(sx, r1) * faceDirection;
+        normal = normalize(abs(det) * normal - sign(det) * (dH.x * r1 + dH.y * r2));
+      }`,
+    )
+    .replace(
+      "#include <emissivemap_fragment>",
+      "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= mix(1.0, paintRock.x, paintSteep * 0.85);",
+    );
   shader.fragmentShader = shader.fragmentShader.replace(
     "#include <fog_fragment>",
     `#ifdef USE_FOG

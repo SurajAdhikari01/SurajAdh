@@ -76,6 +76,86 @@ export function graniteTexture(seed: number) {
   return { map, bumpMap };
 }
 
+/**
+ * Grey rock detail for the mountain's steep faces, centred on mid grey so the
+ * terrain shader can multiply it in: mottling, flecks, joints and bedding
+ * cracks with a lit lip. Drawn wrapped, so it tiles without a seam.
+ */
+export function cliffTexture(seed = 5) {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const c = canvas.getContext("2d")!;
+  const random = rng(seed);
+  const wrapped = (draw: (dx: number, dy: number) => void) => {
+    for (const dx of [-size, 0, size]) for (const dy of [-size, 0, size]) draw(dx, dy);
+  };
+  c.fillStyle = "#808080";
+  c.fillRect(0, 0, size, size);
+  // Broad mottling.
+  for (let i = 0; i < 420; i += 1) {
+    const x = random() * size;
+    const y = random() * size;
+    const r = 10 + random() * 80;
+    c.fillStyle = `rgba(${random() > 0.5 ? "255,255,255" : "0,0,0"},${0.03 + random() * 0.06})`;
+    wrapped((dx, dy) => {
+      c.beginPath();
+      c.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+      c.fill();
+    });
+  }
+  // A jagged line: a crack, with a pale lip above it where light catches.
+  const crack = (pts: [number, number][], width: number, dark: number) => {
+    wrapped((dx, dy) => {
+      c.lineJoin = "miter";
+      c.beginPath();
+      pts.forEach(([x, y], k) => (k ? c.lineTo(x + dx + 0.8, y + dy - 1.2) : c.moveTo(x + dx + 0.8, y + dy - 1.2)));
+      c.strokeStyle = `rgba(255,255,255,${dark * 0.35})`;
+      c.lineWidth = width * 0.8;
+      c.stroke();
+      c.beginPath();
+      pts.forEach(([x, y], k) => (k ? c.lineTo(x + dx, y + dy) : c.moveTo(x + dx, y + dy)));
+      c.strokeStyle = `rgba(20,18,16,${dark})`;
+      c.lineWidth = width;
+      c.stroke();
+    });
+  };
+  // Bedding: long, gently wavy, roughly level cracks right across.
+  for (let i = 0; i < 7; i += 1) {
+    const y0 = (i + random() * 0.6) * (size / 7);
+    const pts: [number, number][] = [];
+    let y = y0;
+    for (let x = 0; x <= size; x += 12) {
+      y += (random() - 0.5) * 5 + (y0 - y) * 0.15;
+      pts.push([x, y]);
+    }
+    crack(pts, 1.6 + random() * 1.8, 0.45 + random() * 0.3);
+  }
+  // Joints: shorter, steep, stepping cracks between the beds.
+  for (let i = 0; i < 55; i += 1) {
+    let x = random() * size;
+    let y = random() * size;
+    const lean = (random() - 0.5) * 0.9;
+    const pts: [number, number][] = [[x, y]];
+    const steps = 4 + Math.floor(random() * 10);
+    for (let k = 0; k < steps; k += 1) {
+      x += lean * 9 + (random() - 0.5) * 7;
+      y += 6 + random() * 9;
+      pts.push([x, y]);
+    }
+    crack(pts, 0.8 + random() * 1.6, 0.3 + random() * 0.35);
+  }
+  // Grain.
+  for (let i = 0; i < 9000; i += 1) {
+    c.fillStyle = random() > 0.5 ? "rgba(20,20,20,0.22)" : "rgba(255,255,255,0.2)";
+    c.fillRect(random() * size, random() * size, 1 + random() * 2, 1 + random() * 2);
+  }
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.anisotropy = 8;
+  return map;
+}
+
 const PAINT = "#b3211c";
 const PAINT_DARK = "#2b2725";
 
