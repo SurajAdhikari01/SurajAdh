@@ -15,7 +15,7 @@ export const WATER = 1.4;
 /** Where the sun sits (by day): low in the south-west, at golden hour. */
 export const SUN: [number, number, number] = [-150, 34, 70];
 
-export type StationId = "sajilo" | "projects" | "stack" | "about" | "contact";
+export type StationId = "projects" | "stack" | "about" | "contact";
 
 export type Station = {
   id: StationId;
@@ -42,7 +42,6 @@ export const STATIONS: Station[] = [
   { id: "about", name: "Base Camp", nepali: "आधार शिविर", s: 0.07, color: "#fcd34d" },
   { id: "stack", name: "Camp I", nepali: "पहिलो शिविर", s: 0, height: 0.24, color: "#7dd3fc" },
   { id: "projects", name: "Camp II", nepali: "दोस्रो शिविर", s: 0, height: 0.5, color: "#fda4af" },
-  { id: "sajilo", name: "High camp", nepali: "सजिलो", s: 0, height: 0.76, color: "#c4b5fd" },
   { id: "contact", name: "Summit", nepali: "शिखर", s: 1, color: "#86efac" },
 ];
 
@@ -202,7 +201,7 @@ export function summit(x: number, z: number, r = 6): [number, number, number] {
   return best;
 }
 
-// Altitudes read in metres, scaled so Sajilo Summit stands at 8,848 m.
+// Altitudes read in metres, scaled so the summit stands at 8,848 m.
 const SAJILO_TOP = summit(0, -58)[1];
 export const metres = (y: number) => Math.round(1300 + (y / SAJILO_TOP) * (8848 - 1300));
 
@@ -421,9 +420,12 @@ function findSurface(
 /** March a ray from `from` until it meets the ground; null if it never does. */
 export function castToGround(from: Vec3, dir: Vec3, max: number): Vec3 | null {
   let prev = 0;
-  for (let t = 0.2; t <= max; t += 0.12) {
+  // Stride by a fraction of the ray's clearance above the ground: long
+  // steps through open air, short ones near the slope, never under 12 cm.
+  for (let t = 0.2; t <= max; ) {
     const y = from[1] + dir[1] * t;
-    if (y < heightAt(from[0] + dir[0] * t, from[2] + dir[2] * t)) {
+    const ground = heightAt(from[0] + dir[0] * t, from[2] + dir[2] * t);
+    if (y < ground) {
       let lo = prev;
       let hi = t;
       for (let k = 0; k < 10; k += 1) {
@@ -434,6 +436,7 @@ export function castToGround(from: Vec3, dir: Vec3, max: number): Vec3 | null {
       return [from[0] + dir[0] * hi, from[1] + dir[1] * hi, from[2] + dir[2] * hi];
     }
     prev = t;
+    t += Math.max(0.12, (y - ground) * 0.3);
   }
   return null;
 }
@@ -460,7 +463,6 @@ const KINDS: Record<string, Inscription["kind"]> = {
   about: "arch",
   stack: "far",
   projects: "far",
-  sajilo: "face",
   contact: "banner",
 };
 
@@ -590,22 +592,12 @@ export function inscriptionFor(chapter: Chapter): Inscription {
     // standing up toward the climber, on whichever side rises.
     const uphill = heightAt(eye[0] + right[0] * 4, eye[2] + right[2] * 4) > heightAt(eye[0] - right[0] * 4, eye[2] - right[2] * 4) ? 1 : -1;
     const turns = Array.from({ length: 10 }, (_, k) => 0.45 + k * 0.13);
-    // High camp writes in the snow slope itself: the whole sheet must lie on
-    // the slope, well clear of the skyline.
-    const inSnow = chapter.key === "sajilo";
     const hit = findSurface(
       eye,
-      dirs(
-        inSnow ? Array.from({ length: 14 }, (_, k) => 0.2 + k * 0.1) : turns,
-        inSnow ? [0.12, 0.06, 0, -0.06, -0.12, -0.18, -0.24] : [0.3, 0.18, 0.08, -0.02, -0.12],
-        [uphill, -uphill],
-        (_t, pitch, side) => (inSnow ? Math.abs(pitch + 0.06) * 6 : -pitch * 4) + (side === uphill ? 0 : 2),
-      ),
-      inSnow ? 2.4 : 3,
+      dirs(turns, [0.3, 0.18, 0.08, -0.02, -0.12], [uphill, -uphill], (_t, pitch, side) => -pitch * 4 + (side === uphill ? 0 : 2)),
+      3,
       9,
-      inSnow ? 4 : 5,
-      sheetWidth,
-      inSnow,
+      5,
     );
     if (hit) return { kind: "face", center: hit, facing: toward(hit[0], hit[2]), eye, look: hit };
     // Nothing standing near enough: write in the ground ahead instead.
@@ -615,7 +607,7 @@ export function inscriptionFor(chapter: Chapter): Inscription {
   }
 
   // Stones rest on the uphill side of the trail, leaning into the slope.
-  const ahead = chapter.key === "sajilo" ? 4.8 : 3.6;
+  const ahead = 3.6;
   const probe = (k: number) => heightAt(eye[0] + forward[0] * ahead + right[0] * k, eye[2] + forward[2] * ahead + right[2] * k);
   // On the uphill edge of the camp's flat ground, so it never hangs over a drop.
   const side = probe(1.9) >= probe(-1.9) ? 1.9 : -1.9;

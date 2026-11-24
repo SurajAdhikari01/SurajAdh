@@ -150,55 +150,31 @@ function wrap(c: CanvasRenderingContext2D, text: string, width: number) {
   return lines;
 }
 
-/** A granite boulder by the trail, painted in red. */
-export function paintStone(panel: Panel) {
+/**
+ * Only the paint, on a clear ground, for laying over a boulder's own rock so
+ * the stone shows between the letters and the words follow its surface.
+ */
+export function paintStoneLetters(panel: Panel) {
   const { w, h } = inscriptionSize(panel, 1);
+  const k = 2;
   const colour = document.createElement("canvas");
   const bump = document.createElement("canvas");
-  colour.width = bump.width = w;
-  colour.height = bump.height = h;
+  colour.width = bump.width = w * k;
+  colour.height = bump.height = h * k;
   const c = colour.getContext("2d")!;
   const b = bump.getContext("2d")!;
-  granite(c, b, w, h, w + h);
-  writeText(c, panel, w, (text, x, y, isAccent) => paint(c, b, text, x, y, isAccent ? PAINT : PAINT_DARK));
-  return { ...textures(colour, bump), aspect: h / w };
-}
-
-/** A mani stone: dark rock, letters cut in and painted white. */
-export function paintMani(panel: Panel, accent: string) {
-  const { w, h } = inscriptionSize(panel, 1);
-  const colour = document.createElement("canvas");
-  const bump = document.createElement("canvas");
-  colour.width = bump.width = w;
-  colour.height = bump.height = h;
-  const c = colour.getContext("2d")!;
-  const b = bump.getContext("2d")!;
-  const random = rng(w * 3 + h);
-  c.fillStyle = "#3f3a35";
-  c.fillRect(0, 0, w, h);
-  for (let i = 0; i < 800; i += 1) {
-    c.fillStyle = `rgba(${random() > 0.5 ? "255,240,220" : "10,8,6"},${0.025 + random() * 0.05})`;
-    c.beginPath();
-    c.arc(random() * w, random() * h, 4 + random() * 60, 0, Math.PI * 2);
-    c.fill();
-  }
-  b.fillStyle = "#fff";
+  c.scale(k, k);
+  b.scale(k, k);
+  b.fillStyle = "#808080";
   b.fillRect(0, 0, w, h);
-  for (let i = 0; i < 1400; i += 1) {
-    b.fillStyle = `rgba(0,0,0,${random() * 0.08})`;
-    b.fillRect(random() * w, random() * h, 2 + random() * 8, 2 + random() * 8);
+  writeText(c, panel, w, (text, x, y, isAccent) => paint(c, b, text, x, y, isAccent ? PAINT : PAINT_DARK));
+  // Paint worn off where the rock is rough.
+  const random = rng(w * 5 + h);
+  c.globalCompositeOperation = "destination-out";
+  for (let i = 0; i < 2200; i += 1) {
+    c.fillStyle = `rgba(0,0,0,${0.25 + random() * 0.55})`;
+    c.fillRect(random() * w, random() * h, 0.8 + random() * 2.4, 0.8 + random() * 2.4);
   }
-  writeText(c, panel, w, (text, x, y, isAccent) => {
-    c.fillStyle = "rgba(10,8,6,0.85)";
-    c.fillText(text, x - 1.5, y - 2);
-    c.fillStyle = isAccent ? accent : "#f1e8d8";
-    c.fillText(text, x, y);
-  });
-  b.filter = "blur(1.5px)";
-  writeText(b, panel, w, (text, x, y) => {
-    b.fillStyle = "#000";
-    b.fillText(text, x, y);
-  });
   return { ...textures(colour, bump), aspect: h / w };
 }
 

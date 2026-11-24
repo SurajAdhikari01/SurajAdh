@@ -64,17 +64,6 @@ export function panelFor(chapter: Chapter, projects: ExploreProject[]): Panel {
         actions: projects.map((p) => ({ label: p.name, href: p.url, external: true })),
         accent: "#fda4af",
       };
-    case "sajilo":
-      return {
-        kicker: `High camp · ${alt("sajilo")} · सजिलो`,
-        title: [[{ t: "A language," }], [{ t: "in " }, { t: "Nepali.", em: true }]],
-        body: ["Keywords in Nepali, compiled to x86-64.", "Lexer, parser, types, IR: done. Codegen: climbing."],
-        actions: [
-          { label: "Read about Sajilo", href: "/sajilo" },
-          { label: "Source", href: `${GITHUB}/sajilo-compiler`, external: true },
-        ],
-        accent: "#c4b5fd",
-      };
     default:
       return {
         kicker: `Summit · ${alt("contact")}`,

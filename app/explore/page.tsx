@@ -10,15 +10,14 @@ import "./explore.css";
 
 export const metadata: Metadata = {
   title: "Explore in 3D — Suraj Adhikari",
-  description: "Climb one Himalayan peak, camp by camp, to find Suraj Adhikari's work: skills, projects, and Sajilo at the summit.",
+  description: "Climb one Himalayan peak, camp by camp, to find Suraj Adhikari's work: skills and projects on the way to the summit.",
   alternates: { canonical: "/explore" },
 };
 
 export default async function ExplorePage() {
   const github = await getGitHubShowcase();
-  // Sajilo is the summit; every other project is a flag on the way up.
+  // Every project is a prayer flag at Camp II.
   const projects = github.repositories
-    .filter((repo) => repo.name !== "sajilo-compiler")
     .map((repo) => ({
       name: repo.name,
       url: repo.html_url,

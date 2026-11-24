@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Line, Sky, Stars } from "@react-three/drei";
+import { Line, PerformanceMonitor, Sky, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
 import * as THREE from "three";
@@ -28,7 +28,7 @@ import {
 } from "./world";
 import type { Chapter, ExploreProject, Inscription, Shot } from "./world";
 import { panelFor } from "./content";
-import { FAR_RED, farSize, graniteTexture, inscriptionSize, paintArch, paintBanner, paintFar, paintFlag, paintMani, paintOnRock, paintSnow, paintStone } from "./painter";
+import { FAR_RED, farSize, graniteTexture, inscriptionSize, paintArch, paintBanner, paintFar, paintFlag, paintOnRock, paintSnow, paintStoneLetters } from "./painter";
 
 type Props = {
   projects: ExploreProject[];
@@ -194,7 +194,7 @@ function useFirGeometry() {
       const r = 1.0 * (1 - k * 0.21);
       const h = 1.2 * (1 - k * 0.13);
       const y0 = 0.55 + k * 0.58;
-      const cone = new THREE.ConeGeometry(r, h, 11, 2);
+      const cone = new THREE.ConeGeometry(r, h, 8, 1);
       const pos = cone.attributes.position as THREE.BufferAttribute;
       // Ragged, drooping rim: branch tips at uneven lengths, hanging down.
       for (let i = 0; i < pos.count; i += 1) {
@@ -224,7 +224,7 @@ function Trees() {
   const transforms = useMemo(() => {
     const random = rng(42);
     const out: { x: number; y: number; z: number; s: number; tint: number; turn: number; lean: number }[] = [];
-    for (let tries = 0; tries < 40000 && out.length < 3600; tries += 1) {
+    for (let tries = 0; tries < 40000 && out.length < 2600; tries += 1) {
       const x = (random() - 0.5) * WORLD * 0.92;
       const z = (random() - 0.5) * WORLD * 0.92;
       const y = heightAt(x, z);
@@ -257,7 +257,7 @@ function Trees() {
   }, [transforms]);
 
   return (
-    <instancedMesh ref={ref} args={[geometry, undefined, transforms.length]} castShadow receiveShadow>
+    <instancedMesh ref={ref} args={[geometry, undefined, transforms.length]} receiveShadow>
       <meshStandardMaterial vertexColors flatShading roughness={0.95} />
     </instancedMesh>
   );
@@ -353,63 +353,123 @@ function Clouds({ night, shots }: { night: boolean; shots: Shot[] }) {
 
 /* ── Inscriptions ───────────────────────────────────────────────────────── */
 
-// A mani stone: a thick, weathered slab, its face carved and painted.
+// A boulder by the trail: an irregular, weathered lump of granite with a
+// broad, gently curved face, the words painted straight onto its rock.
 function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; projects: ExploreProject[] }) {
   const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
   const mani = at.kind === "mani";
-  // High camp's stone is a slab of cliff; the others are trailside rocks.
-  const width = chapter.key === "sajilo" ? 4 : mani ? 2.8 : 3.2;
+  const width = mani ? 2.8 : 3.2;
   const { map, bumpMap, height } = useMemo(() => {
-    const painted = mani ? paintMani(panel, panel.accent) : paintStone(panel);
+    const painted = paintStoneLetters(panel);
     return { ...painted, height: inscriptionSize(panel, width).worldHeight };
-  }, [panel, mani, width]);
+  }, [panel, width]);
 
-
-  // Rough out a boulder: a gently domed face for the words, its rim rolling
-  // away into rounded, weathered sides and a broad back.
-  const depth = mani ? 0.8 : 1.6;
-  const geometry = useMemo(() => {
-    const W = width + 0.7;
-    const H = height + 0.7;
-    const g = new THREE.BoxGeometry(W, H, depth, 30, 22, 8);
+  const depth = mani ? 1.4 : 2.4;
+  const seed = Math.round(Math.abs(at.center[0] * 13 + at.center[2] * 7)) % 97;
+  const { rock, letters } = useMemo(() => {
+    const A = (width + 1.5) / 2;
+    const B = height / 2 + 0.5;
+    const C = depth / 2;
+    const below = B + 1.6; // the part sunk into the ground runs deeper
+    const random = rng(seed + 5);
+    // A few old fracture planes, on the top, sides and back, never the face.
+    // Each chips one shoulder or the back, so no two meet in a ridge.
+    const cuts = [-1, 1, -1, 1].map((side, i) => {
+      const n = new THREE.Vector3(side * (0.5 + random() * 0.5), 0.3 + random() * 0.5, -0.1 - random() * (i > 1 ? 0.9 : 0.3));
+      n.normalize();
+      const reach = Math.sqrt((A * n.x) ** 2 + (B * n.y) ** 2 + (C * n.z) ** 2);
+      return { n, k: reach * (0.84 + random() * 0.08) };
+    });
+    const g = new THREE.IcosahedronGeometry(1, 14);
     const pos = g.attributes.position as THREE.BufferAttribute;
-    const v = new THREE.Vector3();
+    const d = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const e = 2.7;
     for (let i = 0; i < pos.count; i += 1) {
-      v.fromBufferAttribute(pos, i);
-      const nx = v.x / (W / 2);
-      const ny = v.y / (H / 2);
-      const nz = v.z / (depth / 2);
-      const edge = Math.max(Math.abs(nx), Math.abs(ny));
-      // Round the whole block toward an ellipsoid, more at the back.
-      const r = Math.hypot(nx * 0.7, ny * 0.7, Math.max(0, -nz) * 0.9);
-      const pull = Math.max(0, r - 0.75) * 0.35;
-      v.x *= 1 - pull;
-      v.y *= 1 - pull * (v.y > 0 ? 1 : 0.4);
-      if (nz > 0.99) {
-        // The face: a low dome, falling away near the rim.
-        v.z -= (nx * nx + ny * ny) * 0.12 + Math.max(0, edge - 0.84) * 1.6;
-        weather(v, edge < 0.84 ? 0.012 : 0.12, 9);
-      } else weather(v, 0.22, 9);
-      pos.setXYZ(i, v.x, v.y, v.z);
+      d.fromBufferAttribute(pos, i).normalize();
+      const b = d.y < 0 ? below : B;
+      const r = (Math.abs(d.x / A) ** e + Math.abs(d.y / b) ** e + Math.abs(d.z / C) ** e) ** (-1 / e);
+      p.copy(d).multiplyScalar(r);
+      // A broad face, only slightly convex, its rim rolling away softly.
+      const flat = C * 0.7;
+      if (p.z > flat) p.z = flat + (p.z - flat) * 0.28;
+      // Wider and deeper at the foot than the crown.
+      const t = THREE.MathUtils.clamp(p.y / B, -1, 1);
+      // One shoulder sits higher than the other.
+      if (p.y > 0) p.y += (0.16 * (p.x / A) * p.y * p.y) / B;
+      p.x *= 1 - 0.1 * t;
+      p.z = p.z * (1 - 0.1 * t) - Math.max(0, t) ** 2 * 0.14;
+      // Big, slow lumps everywhere; barely any on the painted face.
+      const face = THREE.MathUtils.smoothstep(d.z, 0.35, 0.85);
+      const lump = 1.3 * rockNoise.noise(p.x * 0.4 + seed, p.y * 0.4, p.z * 0.4 + 1.7) + 0.5 * rockNoise.noise(p.x * 1.3, p.y * 1.3 + seed, p.z * 1.3);
+      p.addScaledVector(d, lump * THREE.MathUtils.lerp(0.3, 0.04, face));
+      // Old fractures: flattened, slightly bevelled planes.
+      for (const c of cuts) {
+        const over = p.dot(c.n) - c.k;
+        if (over > 0) p.addScaledVector(c.n, -over * 0.7);
+      }
+      weather(p, THREE.MathUtils.lerp(0.05, 0.012, face), seed);
+      pos.setXYZ(i, p.x, p.y, p.z);
     }
+    g.deleteAttribute("normal");
+    g.deleteAttribute("uv");
     const merged = BufferGeometryUtils.mergeVertices(g, 1e-4);
-    merged.computeVertexNormals();
     g.dispose();
-    return merged;
-  }, [width, height, depth, at.center]);
+    merged.computeVertexNormals();
 
-  // Each face of the box gets a material; only the front carries the words.
+    // The paint: a sheet laid onto the face, every point dropped onto the rock.
+    const sheet = new THREE.PlaneGeometry(width, height, 36, Math.max(8, Math.round((36 * height) / width)));
+    const sp = sheet.attributes.position as THREE.BufferAttribute;
+    const caster = new THREE.Raycaster();
+    const probe = new THREE.Mesh(merged);
+    const dir = new THREE.Vector3(0, 0, -1);
+    for (let i = 0; i < sp.count; i += 1) {
+      caster.set(new THREE.Vector3(sp.getX(i), sp.getY(i), C * 3), dir);
+      const hit = caster.intersectObject(probe, false)[0];
+      sp.setZ(i, (hit ? hit.point.z : C * 0.7) + 0.015);
+    }
+    sheet.computeVertexNormals();
+    return { rock: merged, letters: sheet };
+  }, [width, height, depth, seed]);
+
   const materials = useMemo(() => {
     const stone = graniteTexture(mani ? 3 : 7);
-    stone.map.repeat.set(0.5, 0.5);
-    stone.bumpMap.repeat.copy(stone.map.repeat);
-    const rock = new THREE.MeshStandardMaterial({ map: stone.map, bumpMap: stone.bumpMap, bumpScale: 1.6, color: mani ? "#5a534c" : "#ffffff", roughness: 0.95, emissiveMap: stone.map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: mani ? 0 : 0.06 });
-    // The painted letters carry a little light of their own, like whitewash
-    // catching the sky, so they still read when the stone is in shadow.
-    const face = new THREE.MeshStandardMaterial({ map, bumpMap, bumpScale: 3, roughness: 0.85, emissiveMap: map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: mani ? 0.22 : 0.08 });
-    return [rock, rock, rock, rock, face, rock];
+    const rockMat = new THREE.MeshStandardMaterial({ map: stone.map, color: mani ? "#5a534c" : "#ffffff", roughness: 0.95 });
+    stone.bumpMap.dispose();
+    stone.map.wrapS = stone.map.wrapT = THREE.MirroredRepeatWrapping;
+    // Granite projected from three sides and blended by the surface's facing,
+    // so the grain wraps the lump without a seam or a pinch anywhere.
+    rockMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vRockPos;\nvarying vec3 vRockNorm;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvRockPos = position;\nvRockNorm = normal;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vRockPos;\nvarying vec3 vRockNorm;")
+        .replace(
+          "#include <map_fragment>",
+          `vec3 tw = pow(abs(normalize(vRockNorm)), vec3(4.0));
+          tw /= tw.x + tw.y + tw.z;
+          vec3 rp = vRockPos / 2.6 + vec3(0.37, 0.61, 0.23);
+          vec4 tex = texture2D(map, rp.zy) * tw.x + texture2D(map, rp.xz) * tw.y + texture2D(map, rp.xy) * tw.z;
+          diffuseColor *= tex;`,
+        )
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * " + (mani ? "0.0" : "0.06") + ";");
+    };
+    // The letters carry a little light of their own, like paint catching the
+    // sky, so they still read when the stone is in shadow.
+    const paintMat = new THREE.MeshStandardMaterial({ map, bumpMap, bumpScale: 2, roughness: 0.8, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, emissiveMap: map, emissive: new THREE.Color("#ffffff"), emissiveIntensity: 0.08 });
+    return { rock: rockMat, paint: paintMat };
   }, [map, bumpMap, mani]);
-  useEffect(() => () => { geometry.dispose(); map.dispose(); bumpMap.dispose(); materials.forEach((m) => { m.map?.dispose(); m.bumpMap?.dispose(); m.dispose(); }); }, [geometry, map, bumpMap, materials]);
+  useEffect(() => () => {
+    rock.dispose();
+    letters.dispose();
+    map.dispose();
+    bumpMap.dispose();
+    materials.rock.map?.dispose();
+    materials.rock.bumpMap?.dispose();
+    materials.rock.dispose();
+    materials.paint.dispose();
+  }, [rock, letters, map, bumpMap, materials]);
 
   // A few loose rocks at the foot, broken off the boulder long ago.
   const rubble = useMemo(() => {
@@ -417,8 +477,8 @@ function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; p
     return Array.from({ length: 6 }, () => {
       const side = random() > 0.5 ? 1 : -1;
       return {
-        x: side * (width / 2 + 0.1 + random() * 0.9),
-        z: 0.2 + random() * 0.9,
+        x: side * (width / 2 + 0.6 + random() * 0.9),
+        z: 0.4 + random() * 0.9,
         s: 0.12 + random() * 0.28,
         r: random() * 6,
       };
@@ -426,29 +486,18 @@ function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; p
   }, [width, at.center]);
 
   const yaw = Math.atan2(at.facing[0], at.facing[2]);
+  const lean = mani ? -0.28 : -0.08;
   return (
     <group position={at.center} rotation={[0, yaw, 0]}>
-      {/* Mani stones lean back against the slope; boulders stand. */}
-      <mesh geometry={geometry} material={materials} rotation-x={mani ? -0.28 : -0.08} castShadow receiveShadow />
-      {/* The rest of the rock, sunk into the ground beneath the face. */}
-      <mesh position={[0, -height / 2 - 1, -depth * 0.25]} rotation-x={mani ? -0.28 : -0.08} scale={[width / 2 + 0.3, 1.4, depth * 0.62]} material={materials[0]} castShadow receiveShadow>
-        <dodecahedronGeometry args={[1, 1]} />
-      </mesh>
-      {rubble.map((r, i) => {
-        const x = r.x;
-        const z = r.z;
-        return (
-          <mesh key={i} position={[x, -height / 2 - 0.3 + r.s * 0.3, z]} rotation={[r.r, r.r * 1.7, r.r * 0.4]} scale={[r.s * 1.3, r.s * 0.8, r.s]} material={materials[0]} castShadow receiveShadow>
-            <dodecahedronGeometry args={[1, 0]} />
-          </mesh>
-        );
-      })}
-      {at.center[1] > 18 && (
-        <mesh position={[0, height / 2 + 0.2, -0.25]} rotation-x={mani ? -0.28 : 0} scale={[width / 2 + 0.2, 0.16, 0.5]}>
-          <sphereGeometry args={[1, 20, 8]} />
-          <meshStandardMaterial color="#f4f6fa" roughness={0.6} />
+      <group rotation-x={lean}>
+        <mesh geometry={rock} material={materials.rock} castShadow receiveShadow />
+        <mesh geometry={letters} material={materials.paint} renderOrder={1} />
+      </group>
+      {rubble.map((r, i) => (
+        <mesh key={i} position={[r.x, -height / 2 - 0.3 + r.s * 0.3, r.z]} rotation={[r.r, r.r * 1.7, r.r * 0.4]} scale={[r.s * 1.3, r.s * 0.8, r.s]} material={materials.rock} castShadow receiveShadow>
+          <dodecahedronGeometry args={[1, 1]} />
         </mesh>
-      )}
+      ))}
     </group>
   );
 }
@@ -625,8 +674,6 @@ function Inscribed({ chapter, at, projects }: { chapter: Chapter; at: Inscriptio
   const high = at.center[1] > 22;
   const { map, aspect } = useMemo(() => {
     if (at.kind === "snow") return paintSnow(panel, panel.accent);
-    // High camp: the words pressed into the snow slope above the camp.
-    if (chapter.key === "sajilo") return paintSnow(panel, "#6d4fc2");
     // Across the valley the letters must carry over snow and rock alike.
     if (at.kind === "far") return paintFar(panel, "#f0ebe1", FAR_RED);
     return paintOnRock(panel, high ? "#b3211c" : "#f4efe6", high ? "#7c3aed" : panel.accent);
@@ -642,7 +689,7 @@ function Inscribed({ chapter, at, projects }: { chapter: Chapter; at: Inscriptio
     // The text's size on a virtual sheet held at the wall's distance.
     const width = at.width ?? sheetWidth(dist);
     const height = width * aspect;
-    const g = new THREE.PlaneGeometry(1, 1, 56, 36);
+    const g = new THREE.PlaneGeometry(1, 1, 44, 28);
     const pos = g.attributes.position as THREE.BufferAttribute;
     const p = new THREE.Vector3();
     for (let i = 0; i < pos.count; i += 1) {
@@ -668,7 +715,7 @@ function Inscribed({ chapter, at, projects }: { chapter: Chapter; at: Inscriptio
     return g;
   }, [at, aspect]);
   useEffect(() => () => { geometry.dispose(); map.dispose(); }, [geometry, map]);
-  const snow = at.kind === "snow" || chapter.key === "sajilo";
+  const snow = at.kind === "snow";
   const far = at.kind === "far";
   return (
     <mesh geometry={geometry} receiveShadow>
@@ -794,11 +841,9 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
       const len = Math.hypot(nx, ny, nz) || 1;
       const push = ((nx * wx + ny * wy + nz * wz) / len) * 0.5 * len; // facing x area
       const fx = (nx / len) * push, fy = (ny / len) * push, fz = (nz / len) * push;
-      for (const v of [a, b, c]) {
-        force[v] += fx;
-        force[v + 1] += fy;
-        force[v + 2] += fz;
-      }
+      force[a] += fx; force[a + 1] += fy; force[a + 2] += fz;
+      force[b] += fx; force[b + 1] += fy; force[b + 2] += fz;
+      force[c] += fx; force[c + 1] += fy; force[c + 2] += fz;
     }
     const mass = (width * height) / (COLS * ROWS);
     const dt2 = dt * dt;
@@ -815,34 +860,42 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
     const flutter = fly ? 1 : 0;
     // Across the cloth: the axis waves travel through, as a flag snaps in wind.
     const across = fly ? new THREE.Vector3().crossVectors(fly, new THREE.Vector3(0, 1, 0)).normalize() : null;
+    const wl = Math.hypot(wx, wy, wz) || 1;
+    const sway = Math.sin(t * 1.4 + seed * 0.7) * 0.6 + Math.sin(t * 3.3 + seed) * 0.25;
     for (let i = 0; i < COLS * ROWS; i += 1) {
       if (sewn(i)) continue;
       const o = i * 3;
-      const reach = fly ? (i % COLS) / (COLS - 1) : 0;
-      for (let k = 0; k < 3; k += 1) {
-        const v = (pos[o + k] - prev[o + k]) * 0.985;
-        prev[o + k] = pos[o + k];
-        const w = k === 0 ? wx : k === 1 ? wy : wz;
-        let drift = (carry * w) / (Math.hypot(wx, wy, wz) || 1);
-        if (hang && rope) {
-          const col = (i % COLS) / (COLS - 1);
-          const row = Math.floor(i / COLS) / (ROWS - 1);
-          const ripple = Math.sin(t * 5.2 + col * 3.4 - row * 2.6 + seed) * (0.55 + 0.45 * gust);
-          const sway = Math.sin(t * 1.4 + seed * 0.7) * 0.6 + Math.sin(t * 3.3 + seed) * 0.25;
-          drift += (hang.getComponent(k) * ripple * 3 + rope.getComponent(k) * sway * 1.1) * row;
-        }
-        if (across) {
-          const row = Math.floor(i / COLS) / (ROWS - 1);
-          // A wave running out from the pole, growing toward the free end.
-          const wave = Math.sin(reach * 7.5 - t * 8.5 + row * 1.4 + seed) * (0.35 + 0.65 * gust);
-          const lift = Math.sin(reach * 4 - t * 3.2 + seed) * 0.5;
-          const a = across.getComponent(k) * wave * 14 * reach * flutter + (k === 1 ? lift * 4 * reach : 0);
-          drift += a;
-        }
-        pos[o + k] += v + ((force[o + k] / mass) * 0.06 + drift) * dt2 + (k === 1 ? -9.8 * dt2 : 0);
+      const col = (i % COLS) / (COLS - 1);
+      const row = Math.floor(i / COLS) / (ROWS - 1);
+      // This particle's push, worked out once rather than per axis.
+      let ax = (carry * wx) / wl;
+      let ay = (carry * wy) / wl;
+      let az = (carry * wz) / wl;
+      if (hang && rope) {
+        const ripple = Math.sin(t * 5.2 + col * 3.4 - row * 2.6 + seed) * (0.55 + 0.45 * gust) * 3 * row;
+        const along = sway * 1.1 * row;
+        ax += hang.x * ripple + rope.x * along;
+        ay += hang.y * ripple + rope.y * along;
+        az += hang.z * ripple + rope.z * along;
       }
+      if (across) {
+        // A wave running out from the pole, growing toward the free end.
+        const wave = Math.sin(col * 7.5 - t * 8.5 + row * 1.4 + seed) * (0.35 + 0.65 * gust) * 14 * col * flutter;
+        ax += across.x * wave;
+        ay += across.y * wave + Math.sin(col * 4 - t * 3.2 + seed) * 2 * col;
+        az += across.z * wave;
+      }
+      const vx = (pos[o] - prev[o]) * 0.985;
+      const vy = (pos[o + 1] - prev[o + 1]) * 0.985;
+      const vz = (pos[o + 2] - prev[o + 2]) * 0.985;
+      prev[o] = pos[o];
+      prev[o + 1] = pos[o + 1];
+      prev[o + 2] = pos[o + 2];
+      pos[o] += vx + ((force[o] / mass) * 0.06 + ax) * dt2;
+      pos[o + 1] += vy + ((force[o + 1] / mass) * 0.06 + ay - 9.8) * dt2;
+      pos[o + 2] += vz + ((force[o + 2] / mass) * 0.06 + az) * dt2;
     }
-    for (let it = 0; it < 6; it += 1) {
+    for (let it = 0; it < 4; it += 1) {
       for (let k = 0; k < CLOTH_TIES.length; k += 1) {
         const [i, j] = CLOTH_TIES[k];
         const a = i * 3;
@@ -873,10 +926,16 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
   // Let it settle before anyone sees it.
   useMemo(() => { for (let i = 0; i < 180; i += 1) step(1 / 60); }, [sim]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useFrame((_, delta) => {
-    sim.spare = Math.min(sim.spare + delta, 0.1);
+  useFrame(({ camera }, delta) => {
+    // Only simulate cloth the climber is close enough to see move.
+    if (camera.position.distanceToSquared(sim.pinned[0]) > 45 * 45) {
+      sim.spare = 0;
+      return;
+    }
+    sim.spare = Math.min(sim.spare + delta, 1 / 30);
     let steps = 0;
-    while (sim.spare >= 1 / 60 && steps < 4) {
+    // At most two steps a frame, so a slow frame can't snowball into slower ones.
+    while (sim.spare >= 1 / 60 && steps < 2) {
       step(1 / 60);
       sim.spare -= 1 / 60;
       steps += 1;
@@ -896,7 +955,6 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
     <mesh
       geometry={sim.geometry}
       material={material}
-      castShadow
       frustumCulled={false}
       onPointerOver={href ? (e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; } : undefined}
       onPointerOut={href ? () => { setHover(false); document.body.style.cursor = ""; } : undefined}
@@ -928,8 +986,11 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
       const hit = castToGround(at.eye, [dir.x, dir.y, dir.z], dist * 2.5);
       return (hit ? new THREE.Vector3(...hit) : p).addScaledVector(dir, -off);
     };
-    const start = onWall(-1.45, -0.98, 0.15);
-    const end = onWall(1.45, -0.98, 0.15);
+    // Each end is tied off to a piton driven into the rock.
+    const pitonL = onWall(-1.45, -0.98, 0.03);
+    const pitonR = onWall(1.45, -0.98, 0.03);
+    const start = onWall(-1.45, -0.98, 0.1);
+    const end = onWall(1.45, -0.98, 0.1);
     const sag = 0.16;
     const along = (t: number) => {
       const p = start.clone().lerp(end, t);
@@ -963,8 +1024,73 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
     });
     // The breeze comes along the wall and a little off it, toward the climber.
     const wind = right.clone().multiplyScalar(1.1).addScaledVector(ahead, -0.45).add(new THREE.Vector3(0, 0.15, 0));
-    return { points, flags, cloth, wind };
+
+    // The wall sits in shade, so the rope and flags darken the rock below
+    // them in the light from the sky overhead, tying them to the face.
+    const toSun = ahead.clone().add(new THREE.Vector3(0, -0.85, 0)).normalize();
+    const cast = (p: THREE.Vector3) => {
+      const hit = castToGround([p.x, p.y, p.z], [toSun.x, toSun.y, toSun.z], 8);
+      if (!hit) return null;
+      // Lift it off the true surface by enough to clear the coarser mesh,
+      // but never past halfway back to what casts it.
+      const w = new THREE.Vector3(...hit);
+      return w.addScaledVector(toSun, -Math.min(0.3, w.distanceTo(p) * 0.5));
+    };
+    const shadowRope = points.map(cast).filter((p): p is THREE.Vector3 => !!p);
+    const flagH = cloth * (400 / 512);
+    const shadowFlags = flags
+      .map((f) => {
+        const c = cast(f.pin(0.5).add(new THREE.Vector3(0, -flagH * 0.55, 0)));
+        return c && { at: c, key: f.key };
+      })
+      .filter((f): f is { at: THREE.Vector3; key: string } => !!f);
+    const facing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), ahead.clone().negate());
+
+    // The rope is a real cord; its loose ends hang below each knot.
+    const ropeTube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([pitonL, ...points, pitonR]), 160, 0.022, 6);
+    const tail = (from: THREE.Vector3, side: number) =>
+      new THREE.TubeGeometry(
+        new THREE.CatmullRomCurve3([
+          from,
+          from.clone().add(new THREE.Vector3(0, -0.1, 0)).addScaledVector(right, side * 0.05).addScaledVector(ahead, -0.03),
+          from.clone().add(new THREE.Vector3(0, -0.22, 0)).addScaledVector(right, side * 0.04).addScaledVector(ahead, -0.05),
+          from.clone().add(new THREE.Vector3(0, -0.3, 0)).addScaledVector(right, side * 0.08).addScaledVector(ahead, -0.04),
+        ]),
+        12,
+        0.013,
+        5,
+      );
+    const shadowTube = shadowRope.length > 4 ? new THREE.TubeGeometry(new THREE.CatmullRomCurve3(shadowRope), 160, 0.05, 4) : null;
+    return {
+      points,
+      flags,
+      cloth,
+      flagH,
+      wind,
+      pitons: [pitonL, pitonR],
+      facing,
+      ropeTube,
+      tails: [tail(pitonL, -1), tail(pitonR, 1)],
+      shadowTube,
+      shadowFlags,
+    };
   }, [at, panel, projects]);
+  useEffect(() => () => {
+    rig.ropeTube.dispose();
+    rig.tails.forEach((t) => t.dispose());
+    rig.shadowTube?.dispose();
+  }, [rig]);
+  const shade = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const ctx = c.getContext("2d")!;
+    ctx.filter = "blur(7px)";
+    ctx.fillStyle = "#000";
+    ctx.fillRect(14, 14, 36, 36);
+    const t = new THREE.CanvasTexture(c);
+    return t;
+  }, []);
+  useEffect(() => () => shade.dispose(), [shade]);
   const textures = useMemo(
     () => rig.flags.map((f) => paintFlag(f.project?.name ?? "", f.project?.language ?? null, f.colour)),
     [rig],
@@ -972,7 +1098,42 @@ function WallFlags({ at, panel, projects }: { at: Inscription; panel: ReturnType
   useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
   return (
     <>
-      <Line points={rig.points} color="#e7e5e4" lineWidth={1.3} />
+      <mesh geometry={rig.ropeTube}>
+        <meshStandardMaterial color="#d8cdb8" roughness={1} />
+      </mesh>
+      {rig.tails.map((t, i) => (
+        <mesh key={i} geometry={t}>
+          <meshStandardMaterial color="#d8cdb8" roughness={1} />
+        </mesh>
+      ))}
+      {rig.pitons.map((p, i) => (
+        <group key={i} position={p} quaternion={rig.facing}>
+          {/* The eye of the piton, and the knot cinched through it. */}
+          <mesh>
+            <torusGeometry args={[0.055, 0.014, 6, 14]} />
+            <meshStandardMaterial color="#4a4744" metalness={0.7} roughness={0.45} />
+          </mesh>
+          <mesh position={[0, -0.05, 0.01]} scale={[0.07, 0.06, 0.06]}>
+            <sphereGeometry args={[1, 10, 8]} />
+            <meshStandardMaterial color="#cfc3ad" roughness={1} />
+          </mesh>
+          <mesh position={[0, 0.04, -0.02]} scale={[0.09, 0.09, 1]}>
+            <circleGeometry args={[1, 12]} />
+            <meshBasicMaterial color="#000" transparent opacity={0.35} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+      {rig.shadowTube && (
+        <mesh geometry={rig.shadowTube} renderOrder={1}>
+          <meshBasicMaterial color="#000" transparent opacity={0.35} depthWrite={false} />
+        </mesh>
+      )}
+      {rig.shadowFlags.map((f) => (
+        <mesh key={f.key} position={f.at} quaternion={rig.facing} renderOrder={1}>
+          <planeGeometry args={[rig.cloth * 1.4, rig.flagH * 1.4]} />
+          <meshBasicMaterial map={shade} transparent opacity={0.4} depthWrite={false} />
+        </mesh>
+      ))}
       {rig.flags.map((f, i) => (
         <Cloth
           key={f.key}
@@ -1114,12 +1275,14 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
     const goal = progress.current ?? 0;
-    const gap = goal - state.head;
     if (reducedMotion) state.head = goal;
     else {
-      // About four seconds a leg; faster when several stops away.
-      const speed = 0.26 + Math.max(0, Math.abs(gap) - 1) * 0.6;
-      state.head += Math.sign(gap) * Math.min(Math.abs(gap), speed * dt);
+      // Glide after the scroll: close behind it while scrolling, easing to a
+      // stop wherever the reader stops, never lurching across many stops.
+      const step = THREE.MathUtils.damp(state.head, goal, 3.2, dt) - state.head;
+      const cap = 1.6 * dt;
+      state.head += Math.sign(step) * Math.min(Math.abs(step), cap);
+      if (Math.abs(goal - state.head) < 1e-4) state.head = goal;
     }
     playhead.current = state.head;
 
@@ -1469,6 +1632,8 @@ function Verge() {
       const z = p[2] + ((q[0] - p[0]) / len) * side;
       const y = heightAt(x, z);
       if ((nearTrail(x, z)?.w ?? 0) > 0.05) continue; // keep camps clear
+      // Loose stones and grass only below the snowline; up high the trail is clean snow.
+      if (y > 16) continue;
       if (random() < 0.4) stones.push({ x, y, z, s: 0.06 + random() * random() * 0.5, r: random() * 6 });
       else if (y < 17) for (let k = 0; k < 3; k += 1) tufts.push({ x: x + (random() - 0.5) * 0.5, y, z: z + (random() - 0.5) * 0.5, s: 0.5 + random() * 0.8, r: random() * 6, tint: random() });
     }
@@ -1517,8 +1682,15 @@ function Verge() {
 
 /* ── Scene ──────────────────────────────────────────────────────────────── */
 
-function Ready({ onReady }: { onReady: () => void }) {
+function Ready({ onReady, night }: { onReady: () => void; night: boolean }) {
   const fired = useRef(false);
+  const gl = useThree((s) => s.gl);
+  // Nothing that casts a shadow moves, so draw the shadow map once (and again
+  // when day turns to night) instead of every frame.
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+  }, [gl, night]);
   useFrame(() => {
     if (!fired.current) {
       fired.current = true;
@@ -1590,24 +1762,34 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
         <Noise premultiply blendFunction={BlendFunction.SOFT_LIGHT} opacity={0.35} />
         <Vignette eskil={false} offset={0.22} darkness={0.62} />
       </EffectComposer>
-      <Ready onReady={onReady} />
+      <Ready onReady={onReady} night={night} />
     </>
   );
 }
 
+// The scene ignores which chapter is active (it reads the scroll directly),
+// so scrolling between chapters never re-renders the world.
+const StillWorld = memo(World, (a, b) => {
+  const keys = Object.keys(a) as (keyof Props)[];
+  return keys.every((k) => k === "active" || a[k] === b[k]);
+});
+
 export default function ExploreScene(props: Props) {
+  // Start sharp; if the frame rate sags, render fewer pixels until it recovers.
+  const [dpr, setDpr] = useState(1.5);
   return (
     <Canvas
       className="xp-canvas"
       shadows
-      dpr={[1, 1.6]}
+      dpr={dpr}
       gl={{ antialias: true, powerPreference: "high-performance" }}
       camera={{ fov: 50, near: 0.05, far: 1500, position: STOP_SHOTS[0].pos }}
       eventSource={props.eventRoot as RefObject<HTMLElement> | undefined}
       eventPrefix="client"
       fallback={<p className="xp-nogl">This view needs WebGL, which your browser has turned off.</p>}
     >
-      <World {...props} />
+      <PerformanceMonitor onDecline={() => setDpr(1)} onIncline={() => setDpr(1.5)} flipflops={3} onFallback={() => setDpr(1)} />
+      <StillWorld {...props} />
     </Canvas>
   );
 }

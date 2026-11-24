@@ -27,14 +27,20 @@ function chapterLabel(chapter: Chapter) {
 
 function useCountUp(done: boolean) {
   const [n, setN] = useState(0);
+  const value = useRef(0);
   useEffect(() => {
     let frame = 0;
     const start = performance.now();
     const tick = (now: number) => {
       // Creep toward 90 while loading; run to 100 once the scene is up.
       const t = (now - start) / 1000;
-      setN((prev) => (done ? Math.min(100, prev + 4) : Math.min(90, Math.round(90 * (1 - Math.exp(-t * 1.5))))));
-      frame = requestAnimationFrame(tick);
+      const next = done ? Math.min(100, value.current + 4) : Math.min(90, Math.round(90 * (1 - Math.exp(-t * 1.5))));
+      if (next !== value.current) {
+        value.current = next;
+        setN(next);
+      }
+      // Stop once the count is complete, rather than ticking forever.
+      if (next < 100) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
