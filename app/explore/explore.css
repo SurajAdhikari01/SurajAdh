@@ -17,7 +17,7 @@
 .xp-nogl { position: absolute; inset: 0; display: grid; place-items: center; padding: 2rem; text-align: center; color: #222; }
 
 /* Darkens the side the text sits on, so it reads over any sky. */
-.xp-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, #0c0a1040 0%, transparent 18%, transparent 82%, #0c0a1059 100%); }
+.xp-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse 80% 75% at 50% 50%, transparent 55%, #0c0a1066 100%), linear-gradient(180deg, #0c0a1040 0%, transparent 18%, transparent 82%, #0c0a1059 100%); }
 
 /* ── The page ── */
 .xp-scroll { position: absolute; inset: 0; z-index: 2; overflow-y: auto; overscroll-behavior: none; scrollbar-width: none; outline: none; }

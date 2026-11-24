@@ -4,8 +4,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Line, PerformanceMonitor, Sky, Stars } from "@react-three/drei";
-import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
-import { BlendFunction } from "postprocessing";
 import * as THREE from "three";
 import { ImprovedNoise } from "three/examples/jsm/math/ImprovedNoise.js";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -167,28 +165,34 @@ function useTerrainMaterial() {
   }, []);
 }
 
-// Heights and normals on the fine grid, worked out once.
-function useHeightField() {
-  return useMemo(() => {
-    const n = GRID + 1;
-    const d = WORLD / GRID;
-    const h = new Float32Array(n * n);
-    for (let j = 0; j < n; j += 1) for (let i = 0; i < n; i += 1) h[j * n + i] = heightAt(-HALF + i * d, -HALF + j * d);
-    const normal = new Float32Array(n * n * 3);
-    const v = new THREE.Vector3();
-    for (let j = 0; j < n; j += 1)
-      for (let i = 0; i < n; i += 1) {
-        const l = h[j * n + Math.max(i - 1, 0)];
-        const r = h[j * n + Math.min(i + 1, n - 1)];
-        const u = h[Math.max(j - 1, 0) * n + i];
-        const w = h[Math.min(j + 1, n - 1) * n + i];
-        v.set((l - r) / (2 * d), 1, (u - w) / (2 * d)).normalize();
-        normal.set([v.x, v.y, v.z], (j * n + i) * 3);
-      }
-    return { h, normal, n, d };
-  }, []);
+// Run work when the browser has a moment free, so it never costs a frame.
+type IdleWindow = Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+function whenIdle(cb: () => void, timeout = 300) {
+  const w = window as IdleWindow;
+  if (w.requestIdleCallback) {
+    const id = w.requestIdleCallback(cb, { timeout });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(cb, 30);
+  return () => window.clearTimeout(id);
 }
-type Field = ReturnType<typeof useHeightField>;
+
+// Heights on the fine grid, each sampled only when something first needs it:
+// the coarse ground needs a sixteenth of them, and full detail is filled in
+// only along the part of the mountain the climber actually gets close to.
+function makeField() {
+  const n = GRID + 1;
+  const d = WORLD / GRID;
+  const h = new Float32Array(n * n).fill(Number.NaN);
+  const at = (i: number, j: number) => {
+    const k = j * n + i;
+    let v = h[k];
+    if (v !== v) v = h[k] = heightAt(-HALF + i * d, -HALF + j * d);
+    return v;
+  };
+  return { n, d, at };
+}
+type Field = ReturnType<typeof makeField>;
 
 // A patch of ground from grid cell (i0, j0), `cells` across, every `step`th
 // point, centred on `centre`. A skirt hangs from its rim so where a coarse
@@ -198,10 +202,18 @@ function patchGeometry(f: Field, i0: number, j0: number, cells: number, step: nu
   const pos: number[] = [];
   const nor: number[] = [];
   const idx: number[] = [];
+  const v = new THREE.Vector3();
+  const last = f.n - 1;
   const put = (gi: number, gj: number, drop: number) => {
-    const k = gj * f.n + gi;
-    pos.push(-HALF + gi * f.d - centre.x, f.h[k] - drop - centre.y, -HALF + gj * f.d - centre.z);
-    nor.push(f.normal[k * 3], f.normal[k * 3 + 1], f.normal[k * 3 + 2]);
+    pos.push(-HALF + gi * f.d - centre.x, f.at(gi, gj) - drop - centre.y, -HALF + gj * f.d - centre.z);
+    // Normals from neighbours on this patch's own grid, so a coarse patch
+    // never samples the fine grid it is meant to save.
+    const l = f.at(Math.max(gi - step, 0), gj);
+    const r = f.at(Math.min(gi + step, last), gj);
+    const u = f.at(gi, Math.max(gj - step, 0));
+    const w = f.at(gi, Math.min(gj + step, last));
+    v.set((l - r) / (2 * step * f.d), 1, (u - w) / (2 * step * f.d)).normalize();
+    nor.push(v.x, v.y, v.z);
   };
   for (let r = 0; r < m; r += 1) for (let c = 0; c < m; c += 1) put(i0 + c * step, j0 + r * step, 0);
   for (let r = 0; r < m - 1; r += 1)
@@ -234,44 +246,73 @@ function patchGeometry(f: Field, i0: number, j0: number, cells: number, step: nu
   return g;
 }
 
+type Chunk = { lod: THREE.LOD; centre: THREE.Vector3; i0: number; j0: number; fine: boolean };
+// Full detail is built this close, a little ahead of where the LOD wants it.
+const STREAM = LOD_FROM[1] + 45;
+
 function Terrain() {
-  const field = useHeightField();
   const material = useTerrainMaterial();
   const caster = useRef<THREE.Mesh>(null);
-  const { lods, shadowGeometry } = useMemo(() => {
-    const lods: THREE.LOD[] = [];
+  const { field, chunks, shadowGeometry } = useMemo(() => {
+    const field = makeField();
+    // The whole ground at half detail, only ever drawn into the shadow map.
+    // Its samples are the ones the half and quarter detail patches use.
+    const shadowGeometry = patchGeometry(field, 0, 0, GRID, 2, new THREE.Vector3(), false);
+    const chunks: Chunk[] = [];
     for (let cj = 0; cj < CHUNKS; cj += 1)
       for (let ci = 0; ci < CHUNKS; ci += 1) {
         const i0 = ci * CELLS;
         const j0 = cj * CELLS;
-        const mid = (j0 + CELLS / 2) * field.n + i0 + CELLS / 2;
-        const centre = new THREE.Vector3(-HALF + (i0 + CELLS / 2) * field.d, field.h[mid], -HALF + (j0 + CELLS / 2) * field.d);
+        const centre = new THREE.Vector3(-HALF + (i0 + CELLS / 2) * field.d, field.at(i0 + CELLS / 2, j0 + CELLS / 2), -HALF + (j0 + CELLS / 2) * field.d);
         const lod = new THREE.LOD();
         lod.position.copy(centre);
-        LOD_STEPS.forEach((step, k) => {
+        LOD_STEPS.slice(1).forEach((step, k) => {
           const mesh = new THREE.Mesh(patchGeometry(field, i0, j0, CELLS, step, centre, true), material);
           mesh.receiveShadow = true;
-          lod.addLevel(mesh, LOD_FROM[k], 0.1);
+          lod.addLevel(mesh, k === 0 ? 0 : LOD_FROM[2], 0.1);
         });
-        lods.push(lod);
+        chunks.push({ lod, centre, i0, j0, fine: false });
       }
-    // The whole ground at half detail, only ever drawn into the shadow map.
-    const shadowGeometry = patchGeometry(field, 0, 0, GRID, 2, new THREE.Vector3(), false);
-    return { lods, shadowGeometry };
-  }, [field, material]);
+    return { field, chunks, shadowGeometry };
+  }, [material]);
+
+  const refine = (c: Chunk) => {
+    const mesh = new THREE.Mesh(patchGeometry(field, c.i0, c.j0, CELLS, 1, c.centre, true), material);
+    mesh.receiveShadow = true;
+    c.lod.levels[0].distance = LOD_FROM[1];
+    c.lod.addLevel(mesh, 0, 0.1);
+    c.fine = true;
+  };
+  // The ground around the first view is sharp from the start.
+  useMemo(() => {
+    const eye = new THREE.Vector3(...STOP_SHOTS[0].pos);
+    chunks.forEach((c) => { if (c.centre.distanceTo(eye) < STREAM) refine(c); });
+  }, [chunks]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => () => {
-    lods.forEach((l) => l.levels.forEach((lv) => (lv.object as THREE.Mesh).geometry.dispose()));
+    chunks.forEach((c) => c.lod.levels.forEach((lv) => (lv.object as THREE.Mesh).geometry.dispose()));
     shadowGeometry.dispose();
     material.dispose();
-  }, [lods, shadowGeometry, material]);
-  // The shadow map is drawn once, not every frame: show the caster only for
-  // the frame it is drawn in.
-  useFrame(({ gl }) => {
+  }, [chunks, shadowGeometry, material]);
+
+  useFrame(({ gl, camera }) => {
+    // The shadow map is drawn once, not every frame: show the caster only
+    // for the frame it is drawn in.
     if (caster.current) caster.current.visible = gl.shadowMap.needsUpdate;
+    // Stream in full detail ahead of the climber, the nearest patch first,
+    // one a frame so it never shows as a stall.
+    let next: Chunk | null = null;
+    let best = STREAM;
+    for (const c of chunks) {
+      if (c.fine) continue;
+      const d = camera.position.distanceTo(c.centre);
+      if (d < best) { best = d; next = c; }
+    }
+    if (next) refine(next);
   });
   return (
     <>
-      {lods.map((lod, i) => <primitive key={i} object={lod} />)}
+      {chunks.map((c, i) => <primitive key={i} object={c.lod} />)}
       <mesh ref={caster} geometry={shadowGeometry} material={material} castShadow />
     </>
   );
@@ -352,6 +393,18 @@ function useFarFirGeometry() {
   }, []);
 }
 
+// Whether a point sits in the cone from a camp's eye to its words: the cone
+// widens with distance, as the words do, so nothing hides any of them.
+function blocksSight(sight: { from: [number, number, number]; to: [number, number, number] }, x: number, y: number, z: number) {
+  const [ax, ay, az] = sight.from;
+  const vx = sight.to[0] - ax, vy = sight.to[1] - ay, vz = sight.to[2] - az;
+  const len = Math.hypot(vx, vy, vz) || 1;
+  const t = ((x - ax) * vx + (y - ay) * vy + (z - az) * vz) / (len * len);
+  if (t < 0 || t > 1.05) return false;
+  const off = Math.hypot(ax + vx * t - x, ay + vy * t - y, az + vz * t - z);
+  return off < 1.5 + t * len * 0.34;
+}
+
 const TREE_TILES = 5;
 const TREE_NEAR = 110;
 
@@ -359,18 +412,27 @@ function Trees() {
   const geometry = useFirGeometry();
   const far = useFarFirGeometry();
   const transforms = useMemo(() => {
+    const sights = inscriptions().map((at) => ({ from: at.eye, to: at.center }));
     const random = rng(42);
     const out: { x: number; y: number; z: number; s: number; tint: number; turn: number; lean: number }[] = [];
     for (let tries = 0; tries < 40000 && out.length < 2600; tries += 1) {
       const x = (random() - 0.5) * WORLD * 0.92;
       const z = (random() - 0.5) * WORLD * 0.92;
+      // The cheap test first: most spots fail before the ground is sampled.
+      // (No random draws move, so the forest is the same one as ever.)
+      const patch = Math.sin(x * 0.07) + Math.cos(z * 0.06) + Math.sin((x + z) * 0.04);
+      if (patch < 0) continue;
       const y = heightAt(x, z);
       if (y < WATER + 0.9 || y > 13) continue;
       const slope = Math.abs(heightAt(x + 1, z) - y) + Math.abs(heightAt(x, z + 1) - y);
       if (slope > 1.1 || (nearTrail(x, z)?.d ?? Infinity) < 5) continue;
-      const patch = Math.sin(x * 0.07) + Math.cos(z * 0.06) + Math.sin((x + z) * 0.04);
-      if (patch < 0 || random() > 1 - y / 15) continue;
-      out.push({ x, y, z, s: 0.55 + random() * 0.85, tint: random(), turn: random() * Math.PI * 2, lean: (random() - 0.5) * 0.08 });
+      if (random() > 1 - y / 15) continue;
+      const tree = { x, y, z, s: 0.55 + random() * 0.85, tint: random(), turn: random() * Math.PI * 2, lean: (random() - 0.5) * 0.08 };
+      // Never stand between a camp's viewpoint and the words it looks at.
+      if (sights.some((sight) => [0.6, 1.6, 2.8].some((k) => blocksSight(sight, x, y + k * tree.s, z)))) continue;
+      // And leave a little clearing round each place the climber stops.
+      if (sights.some((sight) => Math.hypot(sight.from[0] - x, sight.from[2] - z) < 10)) continue;
+      out.push(tree);
     }
     return out;
   }, []);
@@ -555,7 +617,7 @@ function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; p
       const reach = Math.sqrt((A * n.x) ** 2 + (B * n.y) ** 2 + (C * n.z) ** 2);
       return { n, k: reach * (0.84 + random() * 0.08) };
     });
-    const g = new THREE.IcosahedronGeometry(1, 14);
+    const g = new THREE.IcosahedronGeometry(1, 10);
     const pos = g.attributes.position as THREE.BufferAttribute;
     const d = new THREE.Vector3();
     const p = new THREE.Vector3();
@@ -593,7 +655,7 @@ function Stone({ chapter, at, projects }: { chapter: Chapter; at: Inscription; p
     merged.computeVertexNormals();
 
     // The paint: a sheet laid onto the face, every point dropped onto the rock.
-    const sheet = new THREE.PlaneGeometry(width, height, 36, Math.max(8, Math.round((36 * height) / width)));
+    const sheet = new THREE.PlaneGeometry(width, height, 22, Math.max(6, Math.round((22 * height) / width)));
     const sp = sheet.attributes.position as THREE.BufferAttribute;
     const caster = new THREE.Raycaster();
     const probe = new THREE.Mesh(merged);
@@ -1098,8 +1160,17 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
     }
   };
 
-  // Let it settle before anyone sees it.
-  useMemo(() => { for (let i = 0; i < 180; i += 1) step(1 / 60); }, [sim]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Let it settle before anyone gets close, in time the browser has spare.
+  useEffect(
+    () =>
+      whenIdle(() => {
+        for (let i = 0; i < 150; i += 1) step(1 / 60);
+        sim.geometry.attributes.position.needsUpdate = true;
+        sim.geometry.computeVertexNormals();
+        sim.geometry.computeBoundingSphere();
+      }, 2000),
+    [sim], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   useFrame(({ camera }, delta) => {
     // Only simulate cloth the climber is close enough to see move.
@@ -1421,6 +1492,19 @@ function SummitFlag({ at, chapter, projects }: { at: Inscription; chapter: Chapt
 
 // The camera keeps its own pace: a gesture moves the page one chapter at
 // once, but the climb between two stops always takes a few seconds.
+// Whether the ground leaves a clear line from `from` to just short of `to`.
+function clearView(from: THREE.Vector3, to: THREE.Vector3) {
+  const steps = 24;
+  for (let i = 1; i < steps; i += 1) {
+    const t = (i / steps) * 0.92;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    const z = from.z + (to.z - from.z) * t;
+    if (y < heightAt(x, z) + 0.3) return false;
+  }
+  return true;
+}
+
 function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "progress" | "playhead" | "reducedMotion" | "altitude">) {
   const camera = useThree((s) => s.camera);
   const size = useThree((s) => s.size);
@@ -1445,7 +1529,18 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
     up: new THREE.Vector3(0, 1, 0),
     sway: { x: 0, y: 0 },
     frame: 0,
+    subject: new THREE.Vector3(),
+    probe: new THREE.Vector3(),
   }), []);
+
+  // On a portrait screen, widen the view so a useful width still fits across
+  // it, rather than walking the camera back up the trail.
+  const fov = size.width < size.height ? Math.min(78, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(24)) / (size.width / size.height)))) : 50;
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    cam.fov = fov;
+    cam.updateProjectionMatrix();
+  }, [camera, fov]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -1465,11 +1560,25 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
     state.wantPos.set(...shot.pos);
     state.wantTarget.set(...shot.target);
 
-    // On a narrow screen, step back from an inscription until it fits.
+    // On a narrow screen, step back from the words only as far as their
+    // width needs, and never so far that a ridge comes between.
     const aspect = size.width / size.height;
     if (aspect < 1 && shot.focus > 0) {
-      const back = 1 + (Math.min(2.4, 1.15 / aspect) - 1) * shot.focus;
-      state.wantPos.sub(state.wantTarget).multiplyScalar(back).add(state.wantTarget);
+      const halfH = Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * aspect);
+      state.subject.set(...shot.subject);
+      const dist = state.wantPos.distanceTo(state.subject);
+      const need = (shot.span * 0.53) / Math.tan(halfH);
+      let back = Math.min(2.6, Math.max(1, need / dist));
+      // Try the full step back, then shorter ones, until the view is clear.
+      for (let k = 0; k < 4 && back > 1; k += 1) {
+        state.probe.copy(state.wantPos).sub(state.subject).multiplyScalar(back).add(state.subject);
+        state.probe.y = Math.max(state.probe.y, heightAt(state.probe.x, state.probe.z) + 0.8);
+        if (clearView(state.probe, state.subject)) break;
+        back = 1 + (back - 1) * 0.5;
+        if (k === 3) back = 1;
+      }
+      back = 1 + (back - 1) * shot.focus;
+      state.wantPos.sub(state.subject).multiplyScalar(back).add(state.subject);
       state.wantPos.y = Math.max(state.wantPos.y, heightAt(state.wantPos.x, state.wantPos.z) + 0.8);
     }
 
@@ -1859,40 +1968,57 @@ function Verge() {
 
 /* ── Scene ──────────────────────────────────────────────────────────────── */
 
-function Ready({ onReady, night }: { onReady: () => void; night: boolean }) {
+// Like three's compileAsync, which shares the GPU's parallel compiling, but
+// it doesn't fall over when a material is rebuilt or dropped while it waits.
+function compileAll(gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+  const pending = gl.compile(scene, camera);
+  return new Promise<void>((resolve) => {
+    const check = () => {
+      pending.forEach((m) => {
+        const program = (gl.properties.get(m) as { currentProgram?: { isReady: () => boolean } }).currentProgram;
+        if (!program || program.isReady()) pending.delete(m);
+      });
+      if (pending.size === 0) resolve();
+      else window.setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+function Ready({ onReady, night, staged }: { onReady: () => void; night: boolean; staged: number }) {
   const fired = useRef(false);
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera);
   // Nothing that casts a shadow moves, so draw the shadow map once (and again
-  // when day turns to night) instead of every frame.
+  // when day turns to night, or another camp is added) instead of every frame.
   useEffect(() => {
     gl.shadowMap.autoUpdate = false;
     gl.shadowMap.needsUpdate = true;
-  }, [gl, night]);
+  }, [gl, night, staged]);
   // Three builds a shader the first time an object is drawn and uploads a
   // texture the first time it is sampled: done lazily, each one stalls a
-  // frame the moment a new camp swings into view. Do it all now, while the
-  // loader is still up, so the climb itself never has to.
-  const warm = () => {
-    gl.compile(scene, camera);
-    const seen = new Set<THREE.Texture>();
-    scene.traverse((o) => {
-      const material = (o as THREE.Mesh).material;
-      for (const m of Array.isArray(material) ? material : material ? [material] : []) {
-        for (const v of Object.values(m)) if (v instanceof THREE.Texture && !seen.has(v)) seen.add(v);
-      }
+  // frame the moment something new swings into view. So build them all up
+  // front, in parallel where the browser can (KHR_parallel_shader_compile),
+  // without blocking the page, and again whenever more of the world is added.
+  const warm = () =>
+    compileAll(gl, scene, camera).then(() => {
+      const seen = new Set<THREE.Texture>();
+      scene.traverse((o) => {
+        const material = (o as THREE.Mesh).material;
+        for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+          for (const v of Object.values(m)) if (v instanceof THREE.Texture) seen.add(v);
+        }
+      });
+      seen.forEach((t) => gl.initTexture(t));
     });
-    seen.forEach((t) => gl.initTexture(t));
-  };
   useEffect(() => {
-    if (fired.current) warm(); // day and night swap the sky; build its shaders too
-  }, [night]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (fired.current) void warm();
+  }, [night, staged]); // eslint-disable-line react-hooks/exhaustive-deps
   useFrame(() => {
     if (!fired.current) {
       fired.current = true;
-      warm();
-      onReady();
+      void warm().then(onReady);
     }
   });
   return null;
@@ -1901,6 +2027,20 @@ function Ready({ onReady, night }: { onReady: () => void; night: boolean }) {
 function World({ projects, progress, playhead, night, reducedMotion, altitude, onReady }: Props) {
   const places = useMemo(() => inscriptions(), []);
   const panels = useMemo(() => CHAPTERS.map((c) => panelFor(c, projects)), [projects]);
+
+  // Load what the first view shows, then the camps further up one at a time
+  // while the reader is still looking at the first: the loader only ever
+  // waits for what is on screen.
+  const [staged, setStaged] = useState(2);
+  const [ready, setReady] = useState(false);
+  const loaded = useCallback(() => {
+    setReady(true);
+    onReady();
+  }, [onReady]);
+  useEffect(() => {
+    if (!ready || staged >= CHAPTERS.length) return;
+    return whenIdle(() => setStaged((n) => n + 1), 400);
+  }, [ready, staged]);
 
   // Golden hour from the south-west, or a moonlit night.
   const sun: [number, number, number] = night ? [-80, 90, -60] : SUN;
@@ -1940,6 +2080,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
       <Verge />
 
       {CHAPTERS.map((chapter, i) => {
+        if (i >= staged) return null;
         const at = places[i];
         if (at.kind === "arch") return <Arch key={chapter.key} chapter={chapter} at={at} projects={projects} />;
         if (at.kind === "face" || at.kind === "far")
@@ -1956,12 +2097,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
 
       <Flight progress={progress} playhead={playhead} reducedMotion={reducedMotion} altitude={altitude} />
 
-      <EffectComposer multisampling={0}>
-        <Bloom mipmapBlur luminanceThreshold={0.9} luminanceSmoothing={0.2} intensity={night ? 1.1 : 0.7} />
-        <Noise premultiply blendFunction={BlendFunction.SOFT_LIGHT} opacity={0.35} />
-        <Vignette eskil={false} offset={0.22} darkness={0.62} />
-      </EffectComposer>
-      <Ready onReady={onReady} night={night} />
+      <Ready onReady={loaded} night={night} staged={staged} />
     </>
   );
 }
@@ -1991,13 +2127,14 @@ export default function ExploreScene(props: Props) {
       className="xp-canvas"
       shadows={{ type: THREE.PCFShadowMap }}
       dpr={dpr}
-      // The effect pass renders the scene into its own buffer, so multisampling
-      // the screen buffer would only cost memory and bandwidth.
-      gl={{ antialias: false, stencil: false, powerPreference: "high-performance" }}
+      // Straight to the screen: no post-processing passes, native
+      // multisampling for clean edges, and colours left as painted. The
+      // vignette is a CSS gradient over the canvas, which costs nothing.
+      flat
+      gl={{ antialias: true, stencil: false, powerPreference: "high-performance" }}
       camera={{ fov: 50, near: 0.05, far: 1500, position: STOP_SHOTS[0].pos }}
       eventSource={props.eventRoot as RefObject<HTMLElement> | undefined}
       eventPrefix="client"
-      onCreated={(st) => { (window as unknown as { __xp: unknown }).__xp = st; }}
       fallback={<p className="xp-nogl">This view needs WebGL, which your browser has turned off.</p>}
     >
       {watching && <PerformanceMonitor onDecline={() => setDpr((d) => Math.max(1, d - 0.25))} />}

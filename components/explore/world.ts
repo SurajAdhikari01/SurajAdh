@@ -306,7 +306,14 @@ export function trailPoint(s: number): Vec3 {
 
 /** Project flags: a row on the downhill edge of Camp II, beyond its writing. */
 export type Chapter = { key: string; kind: "intro" } | { key: string; kind: "station"; id: StationId };
-export type Shot = { pos: Vec3; target: Vec3; focus: number };
+export type Shot = {
+  pos: Vec3;
+  target: Vec3;
+  focus: number;
+  /** The words in view: their middle, and how wide they are, in metres. */
+  subject: Vec3;
+  span: number;
+};
 export type Inscription = {
   kind: "arch" | "boulder" | "mani" | "snow" | "face" | "far" | "banner";
   /** For words thrown onto the ground: the sheet's width at the hit. */
@@ -377,11 +384,17 @@ function findSurface(
   strict = false,
 ): Vec3 | null {
   let best: { hit: Vec3; score: number } | null = null;
-  for (const { dir, bias } of dirs) {
+  // A candidate scores at least its bias, so try them cheapest-bias first and
+  // stop once none left can win; skip the costly whole-sheet check for any
+  // that already can't. Same answer, a fraction of the rays.
+  const order = dirs.map((d, i) => ({ ...d, i })).sort((a, b) => a.bias - b.bias || a.i - b.i);
+  for (const { dir, bias } of order) {
+    if (best && bias >= best.score) break;
     const hit = castToGround(eye, dir, maxD * 1.4);
     if (!hit) continue;
     const d = Math.hypot(hit[0] - eye[0], hit[1] - eye[1], hit[2] - eye[2]);
     if (d < minD || d > maxD) continue;
+    if (best && Math.abs(d - ideal) + bias >= best.score) continue;
     // The sheet's own axes, square to the line of sight.
     const rx = -dir[2];
     const rz = dir[0];
@@ -659,7 +672,17 @@ export function cameraAt(progress: number): Shot {
   const into = finale ? smooth(0.35, 0.95, t) : smooth(0.8, 1, t);
   target = lerp3(target, from.look, out);
   target = lerp3(target, to.look, into);
-  return { pos, target, focus: Math.max(out, into) };
+  const main = out >= into ? from : to;
+  return { pos, target, focus: Math.max(out, into), subject: main.center, span: spanOf(main) };
+}
+
+/** How wide an inscription is, edge to edge, for fitting it on screen. */
+function spanOf(at: Inscription) {
+  if (at.kind === "arch") return ARCH.width + 0.6;
+  if (at.kind === "boulder" || at.kind === "mani") return 4.4;
+  if (at.kind === "banner") return 3.4;
+  const d = Math.hypot(at.center[0] - at.eye[0], at.center[1] - at.eye[1], at.center[2] - at.eye[2]);
+  return (at.width ?? sheetWidth(d)) * 1.15;
 }
 
 export const STOP_SHOTS: Shot[] = CHAPTERS.map((_, i) => cameraAt(i));
