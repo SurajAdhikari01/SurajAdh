@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Line, PerformanceMonitor, Sky, Stars } from "@react-three/drei";
@@ -16,6 +16,7 @@ import {
   SUN,
   WATER,
   WORLD,
+  HALF,
   cameraAt,
   heightAt,
   castToGround,
@@ -45,7 +46,14 @@ type Props = {
   eventRoot?: RefObject<HTMLElement | null>;
 };
 
-const SEGMENTS = 420;
+// The ground is sampled on one fine grid, then cut into chunks that each
+// draw at full, half or quarter detail by distance, the way game terrain is.
+const GRID = 416;
+const CHUNKS = 8;
+const CELLS = GRID / CHUNKS;
+const LOD_STEPS = [1, 2, 4];
+const LOD_FROM = [0, 70, 160];
+const SKIRT = 4;
 
 // Rock weathering that depends only on position, so the corners that
 // triangles share move together and the surface never tears.
@@ -75,14 +83,24 @@ float xpFbm(vec2 p) {
   for (int i = 0; i < 5; i++) { s += a * xpNoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 3.1; a *= 0.5; }
   return s;
 }
+// Three octaves: for broad colour and the bump, where the finest two
+// octaves are smaller than a pixel at any distance the camera sees them.
+float xpFbm3(vec2 p) {
+  float s = 0.0; float a = 0.5;
+  for (int i = 0; i < 3; i++) { s += a * xpNoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 3.1; a *= 0.5; }
+  return s * 1.143;
+}
 `;
 
 const TERRAIN_COLOR = /* glsl */ `
   vec3 wn = normalize(vWNorm);
   float h = vWPos.y;
   float level = wn.y;
-  float broad = xpFbm(vWPos.xz * 0.07);
-  float fine = xpFbm(vWPos.xz * 0.9);
+  float broad = xpFbm3(vWPos.xz * 0.07);
+  // Fine grain and bump only up close: further off they are smaller than a
+  // pixel, so skipping them saves most of the shader and some shimmer.
+  float nearby = 1.0 - smoothstep(55.0, 85.0, distance(vWPos, cameraPosition));
+  float fine = nearby > 0.0 ? mix(xpFbm3(vWPos.xz * 0.9), xpFbm(vWPos.xz * 0.9), nearby) : xpFbm3(vWPos.xz * 0.9);
 
   vec3 meadow = vec3(0.36, 0.45, 0.24);
   vec3 forest = vec3(0.19, 0.29, 0.17);
@@ -97,7 +115,7 @@ const TERRAIN_COLOR = /* glsl */ `
   col = mix(col, rock, smoothstep(14.0, 21.0, h + broad * 5.0));
 
   // Steep faces: bare rock in bands, like bedding planes.
-  float strata = xpFbm(vec2(vWPos.x * 0.04 + vWPos.z * 0.03, h * 0.8));
+  float strata = xpFbm3(vec2(vWPos.x * 0.04 + vWPos.z * 0.03, h * 0.8));
   vec3 cliff = mix(darkRock, rock, smoothstep(0.25, 0.75, strata)) * (0.8 + fine * 0.4);
   col = mix(col, cliff, smoothstep(0.3, 0.6, 1.0 - level));
 
@@ -134,13 +152,13 @@ function useTerrainMaterial() {
         .replace(
           "#include <normal_fragment_maps>",
           `#include <normal_fragment_maps>
-          {
+          if (nearby > 0.0) {
             vec2 bp = vWPos.xz * 1.1;
             float e = 0.08;
-            float b0 = xpFbm(bp);
-            float bx = xpFbm(bp + vec2(e, 0.0));
-            float bz = xpFbm(bp + vec2(0.0, e));
-            vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9;
+            float b0 = xpFbm3(bp);
+            float bx = xpFbm3(bp + vec2(e, 0.0));
+            float bz = xpFbm3(bp + vec2(0.0, e));
+            vec3 bump = vec3(-(bx - b0) / e, 0.0, -(bz - b0) / e) * (1.0 - snowAmt * 0.75) * 0.9 * nearby;
             normal = normalize(normal + (viewMatrix * vec4(bump, 0.0)).xyz);
           }`,
         );
@@ -149,18 +167,114 @@ function useTerrainMaterial() {
   }, []);
 }
 
-function Terrain() {
-  const geometry = useMemo(() => {
-    const g = new THREE.PlaneGeometry(WORLD, WORLD, SEGMENTS, SEGMENTS);
-    g.rotateX(-Math.PI / 2);
-    const position = g.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < position.count; i += 1) position.setY(i, heightAt(position.getX(i), position.getZ(i)));
-    g.computeVertexNormals();
-    return g;
+// Heights and normals on the fine grid, worked out once.
+function useHeightField() {
+  return useMemo(() => {
+    const n = GRID + 1;
+    const d = WORLD / GRID;
+    const h = new Float32Array(n * n);
+    for (let j = 0; j < n; j += 1) for (let i = 0; i < n; i += 1) h[j * n + i] = heightAt(-HALF + i * d, -HALF + j * d);
+    const normal = new Float32Array(n * n * 3);
+    const v = new THREE.Vector3();
+    for (let j = 0; j < n; j += 1)
+      for (let i = 0; i < n; i += 1) {
+        const l = h[j * n + Math.max(i - 1, 0)];
+        const r = h[j * n + Math.min(i + 1, n - 1)];
+        const u = h[Math.max(j - 1, 0) * n + i];
+        const w = h[Math.min(j + 1, n - 1) * n + i];
+        v.set((l - r) / (2 * d), 1, (u - w) / (2 * d)).normalize();
+        normal.set([v.x, v.y, v.z], (j * n + i) * 3);
+      }
+    return { h, normal, n, d };
   }, []);
+}
+type Field = ReturnType<typeof useHeightField>;
+
+// A patch of ground from grid cell (i0, j0), `cells` across, every `step`th
+// point, centred on `centre`. A skirt hangs from its rim so where a coarse
+// patch meets a finer one no crack can open between them.
+function patchGeometry(f: Field, i0: number, j0: number, cells: number, step: number, centre: THREE.Vector3, skirt: boolean) {
+  const m = cells / step + 1;
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const idx: number[] = [];
+  const put = (gi: number, gj: number, drop: number) => {
+    const k = gj * f.n + gi;
+    pos.push(-HALF + gi * f.d - centre.x, f.h[k] - drop - centre.y, -HALF + gj * f.d - centre.z);
+    nor.push(f.normal[k * 3], f.normal[k * 3 + 1], f.normal[k * 3 + 2]);
+  };
+  for (let r = 0; r < m; r += 1) for (let c = 0; c < m; c += 1) put(i0 + c * step, j0 + r * step, 0);
+  for (let r = 0; r < m - 1; r += 1)
+    for (let c = 0; c < m - 1; c += 1) {
+      const a = r * m + c;
+      idx.push(a, a + m, a + 1, a + 1, a + m, a + m + 1);
+    }
+  if (skirt) {
+    const rim: [number, number][] = [];
+    for (let c = 0; c < m; c += 1) rim.push([c, 0]);
+    for (let r = 1; r < m; r += 1) rim.push([m - 1, r]);
+    for (let c = m - 2; c >= 0; c -= 1) rim.push([c, m - 1]);
+    for (let r = m - 2; r > 0; r -= 1) rim.push([0, r]);
+    const base = m * m;
+    rim.forEach(([c, r]) => put(i0 + c * step, j0 + r * step, SKIRT));
+    rim.forEach(([c, r], k) => {
+      const next = rim[(k + 1) % rim.length];
+      const p = r * m + c;
+      const q = next[1] * m + next[0];
+      const pb = base + k;
+      const qb = base + ((k + 1) % rim.length);
+      idx.push(p, pb, q, q, pb, qb, p, q, pb, q, qb, pb);
+    });
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
+
+function Terrain() {
+  const field = useHeightField();
   const material = useTerrainMaterial();
-  useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
-  return <mesh geometry={geometry} material={material} receiveShadow castShadow />;
+  const caster = useRef<THREE.Mesh>(null);
+  const { lods, shadowGeometry } = useMemo(() => {
+    const lods: THREE.LOD[] = [];
+    for (let cj = 0; cj < CHUNKS; cj += 1)
+      for (let ci = 0; ci < CHUNKS; ci += 1) {
+        const i0 = ci * CELLS;
+        const j0 = cj * CELLS;
+        const mid = (j0 + CELLS / 2) * field.n + i0 + CELLS / 2;
+        const centre = new THREE.Vector3(-HALF + (i0 + CELLS / 2) * field.d, field.h[mid], -HALF + (j0 + CELLS / 2) * field.d);
+        const lod = new THREE.LOD();
+        lod.position.copy(centre);
+        LOD_STEPS.forEach((step, k) => {
+          const mesh = new THREE.Mesh(patchGeometry(field, i0, j0, CELLS, step, centre, true), material);
+          mesh.receiveShadow = true;
+          lod.addLevel(mesh, LOD_FROM[k], 0.1);
+        });
+        lods.push(lod);
+      }
+    // The whole ground at half detail, only ever drawn into the shadow map.
+    const shadowGeometry = patchGeometry(field, 0, 0, GRID, 2, new THREE.Vector3(), false);
+    return { lods, shadowGeometry };
+  }, [field, material]);
+  useEffect(() => () => {
+    lods.forEach((l) => l.levels.forEach((lv) => (lv.object as THREE.Mesh).geometry.dispose()));
+    shadowGeometry.dispose();
+    material.dispose();
+  }, [lods, shadowGeometry, material]);
+  // The shadow map is drawn once, not every frame: show the caster only for
+  // the frame it is drawn in.
+  useFrame(({ gl }) => {
+    if (caster.current) caster.current.visible = gl.shadowMap.needsUpdate;
+  });
+  return (
+    <>
+      {lods.map((lod, i) => <primitive key={i} object={lod} />)}
+      <mesh ref={caster} geometry={shadowGeometry} material={material} castShadow />
+    </>
+  );
 }
 
 // A Himalayan fir: a short trunk carrying four tiers of drooping, ragged
@@ -218,9 +332,32 @@ function useFirGeometry() {
   }, []);
 }
 
+// A far-off fir: one ragged cone, enough for a silhouette in the haze.
+function useFarFirGeometry() {
+  return useMemo(() => {
+    const cone = new THREE.ConeGeometry(0.85, 2.7, 6, 1).toNonIndexed();
+    cone.translate(0, 0.45 + 1.35, 0);
+    const pos = cone.attributes.position as THREE.BufferAttribute;
+    const colours = new Float32Array(pos.count * 3);
+    const dark = new THREE.Color("#183322");
+    const light = new THREE.Color("#4b7a43");
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i += 1) {
+      c.copy(dark).lerp(light, Math.min(1, 0.3 + (pos.getY(i) / 3.2) * 0.4));
+      colours.set([c.r, c.g, c.b], i * 3);
+    }
+    cone.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+    cone.computeVertexNormals();
+    return cone;
+  }, []);
+}
+
+const TREE_TILES = 5;
+const TREE_NEAR = 110;
+
 function Trees() {
-  const ref = useRef<THREE.InstancedMesh>(null);
   const geometry = useFirGeometry();
+  const far = useFarFirGeometry();
   const transforms = useMemo(() => {
     const random = rng(42);
     const out: { x: number; y: number; z: number; s: number; tint: number; turn: number; lean: number }[] = [];
@@ -238,28 +375,66 @@ function Trees() {
     return out;
   }, []);
 
-  useEffect(() => {
-    const mesh = ref.current;
-    if (!mesh) return;
+  // Trees grouped into tiles: a tile off screen is skipped whole, and a far
+  // tile draws its trees as plain cones.
+  const tiles = useMemo(() => {
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 });
+    const groups = new Map<number, typeof transforms>();
+    const size = WORLD / TREE_TILES;
+    for (const t of transforms) {
+      const k = Math.min(TREE_TILES - 1, Math.floor((t.x + HALF) / size)) * TREE_TILES + Math.min(TREE_TILES - 1, Math.floor((t.z + HALF) / size));
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(t);
+    }
     const matrix = new THREE.Matrix4();
     const rotation = new THREE.Quaternion();
     const euler = new THREE.Euler();
     const color = new THREE.Color();
-    transforms.forEach((t, i) => {
-      rotation.setFromEuler(euler.set(t.lean, t.turn, t.lean * 0.6));
-      matrix.compose(new THREE.Vector3(t.x, t.y - 0.15, t.z), rotation, new THREE.Vector3(t.s, t.s * (0.95 + t.tint * 0.45), t.s));
-      mesh.setMatrixAt(i, matrix);
-      // Each tree a little different: some bluer, some yellower, some darker.
-      mesh.setColorAt(i, color.setRGB(0.78 + t.tint * 0.3, 0.82 + t.tint * 0.22, 0.74 + (1 - t.tint) * 0.22));
+    return [...groups.values()].map((list) => {
+      const near = new THREE.InstancedMesh(geometry, material, list.length);
+      const distant = new THREE.InstancedMesh(far, material, list.length);
+      list.forEach((t, i) => {
+        rotation.setFromEuler(euler.set(t.lean, t.turn, t.lean * 0.6));
+        matrix.compose(new THREE.Vector3(t.x, t.y - 0.15, t.z), rotation, new THREE.Vector3(t.s, t.s * (0.95 + t.tint * 0.45), t.s));
+        // Each tree a little different: some bluer, some yellower, some darker.
+        color.setRGB(0.78 + t.tint * 0.3, 0.82 + t.tint * 0.22, 0.74 + (1 - t.tint) * 0.22);
+        for (const m of [near, distant]) {
+          m.setMatrixAt(i, matrix);
+          m.setColorAt(i, color);
+        }
+      });
+      for (const m of [near, distant]) {
+        m.receiveShadow = true;
+        m.computeBoundingSphere();
+      }
+      const centre = near.boundingSphere!.center.clone();
+      distant.visible = false;
+      return { near, distant, centre };
     });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [transforms]);
+  }, [transforms, geometry, far]);
+  useEffect(() => () => {
+    tiles[0]?.near.material && (tiles[0].near.material as THREE.Material).dispose();
+    tiles.forEach((t) => { t.near.dispose(); t.distant.dispose(); });
+    far.dispose();
+  }, [tiles, far]);
+
+  useFrame(({ camera }) => {
+    for (const t of tiles) {
+      const close = camera.position.distanceTo(t.centre) < TREE_NEAR;
+      t.near.visible = close;
+      t.distant.visible = !close;
+    }
+  });
 
   return (
-    <instancedMesh ref={ref} args={[geometry, undefined, transforms.length]} receiveShadow>
-      <meshStandardMaterial vertexColors flatShading roughness={0.95} />
-    </instancedMesh>
+    <>
+      {tiles.map((t, i) => (
+        <group key={i}>
+          <primitive object={t.near} />
+          <primitive object={t.distant} />
+        </group>
+      ))}
+    </>
   );
 }
 
@@ -1654,6 +1829,7 @@ function Verge() {
       });
       rocks.current.instanceMatrix.needsUpdate = true;
       if (rocks.current.instanceColor) rocks.current.instanceColor.needsUpdate = true;
+      rocks.current.computeBoundingSphere();
     }
     if (grass.current) {
       tufts.forEach((t, i) => {
@@ -1664,6 +1840,7 @@ function Verge() {
       });
       grass.current.instanceMatrix.needsUpdate = true;
       if (grass.current.instanceColor) grass.current.instanceColor.needsUpdate = true;
+      grass.current.computeBoundingSphere();
     }
   }, [stones, tufts]);
 
@@ -1685,15 +1862,36 @@ function Verge() {
 function Ready({ onReady, night }: { onReady: () => void; night: boolean }) {
   const fired = useRef(false);
   const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
   // Nothing that casts a shadow moves, so draw the shadow map once (and again
   // when day turns to night) instead of every frame.
   useEffect(() => {
     gl.shadowMap.autoUpdate = false;
     gl.shadowMap.needsUpdate = true;
   }, [gl, night]);
+  // Three builds a shader the first time an object is drawn and uploads a
+  // texture the first time it is sampled: done lazily, each one stalls a
+  // frame the moment a new camp swings into view. Do it all now, while the
+  // loader is still up, so the climb itself never has to.
+  const warm = () => {
+    gl.compile(scene, camera);
+    const seen = new Set<THREE.Texture>();
+    scene.traverse((o) => {
+      const material = (o as THREE.Mesh).material;
+      for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+        for (const v of Object.values(m)) if (v instanceof THREE.Texture && !seen.has(v)) seen.add(v);
+      }
+    });
+    seen.forEach((t) => gl.initTexture(t));
+  };
+  useEffect(() => {
+    if (fired.current) warm(); // day and night swap the sky; build its shaders too
+  }, [night]); // eslint-disable-line react-hooks/exhaustive-deps
   useFrame(() => {
     if (!fired.current) {
       fired.current = true;
+      warm();
       onReady();
     }
   });
@@ -1702,6 +1900,7 @@ function Ready({ onReady, night }: { onReady: () => void; night: boolean }) {
 
 function World({ projects, progress, playhead, night, reducedMotion, altitude, onReady }: Props) {
   const places = useMemo(() => inscriptions(), []);
+  const panels = useMemo(() => CHAPTERS.map((c) => panelFor(c, projects)), [projects]);
 
   // Golden hour from the south-west, or a moonlit night.
   const sun: [number, number, number] = night ? [-80, 90, -60] : SUN;
@@ -1747,7 +1946,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
           return (
             <group key={chapter.key}>
               <Inscribed chapter={chapter} at={at} projects={projects} />
-              {chapter.key === "projects" && <WallFlags at={at} panel={panelFor(chapter, projects)} projects={projects} />}
+              {chapter.key === "projects" && <WallFlags at={at} panel={panels[i]} projects={projects} />}
             </group>
           );
         if (at.kind === "banner") return <SummitFlag key={chapter.key} at={at} chapter={chapter} projects={projects} />;
@@ -1768,28 +1967,41 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
 }
 
 // The scene ignores which chapter is active (it reads the scroll directly),
-// so scrolling between chapters never re-renders the world.
+// so scrolling between chapters never re-renders the world, and a rebuilt
+// callback or element ref never does either.
+const IGNORED: (keyof Props)[] = ["active", "onReady", "eventRoot"];
 const StillWorld = memo(World, (a, b) => {
   const keys = Object.keys(a) as (keyof Props)[];
-  return keys.every((k) => k === "active" || a[k] === b[k]);
+  return keys.every((k) => IGNORED.includes(k) || a[k] === b[k]);
 });
 
 export default function ExploreScene(props: Props) {
-  // Start sharp; if the frame rate sags, render fewer pixels until it recovers.
+  // Start sharp; if the frame rate sags, step down to fewer pixels and stay
+  // there. Flipping back and forth resizes every buffer and stutters. Only
+  // watch once the climb has loaded: the loading frames are always slow.
   const [dpr, setDpr] = useState(1.5);
+  const [watching, setWatching] = useState(false);
+  const { onReady } = props;
+  const ready = useCallback(() => {
+    onReady();
+    setWatching(true);
+  }, [onReady]);
   return (
     <Canvas
       className="xp-canvas"
-      shadows
+      shadows={{ type: THREE.PCFShadowMap }}
       dpr={dpr}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+      // The effect pass renders the scene into its own buffer, so multisampling
+      // the screen buffer would only cost memory and bandwidth.
+      gl={{ antialias: false, stencil: false, powerPreference: "high-performance" }}
       camera={{ fov: 50, near: 0.05, far: 1500, position: STOP_SHOTS[0].pos }}
       eventSource={props.eventRoot as RefObject<HTMLElement> | undefined}
       eventPrefix="client"
+      onCreated={(st) => { (window as unknown as { __xp: unknown }).__xp = st; }}
       fallback={<p className="xp-nogl">This view needs WebGL, which your browser has turned off.</p>}
     >
-      <PerformanceMonitor onDecline={() => setDpr(1)} onIncline={() => setDpr(1.5)} flipflops={3} onFallback={() => setDpr(1)} />
-      <StillWorld {...props} />
+      {watching && <PerformanceMonitor onDecline={() => setDpr((d) => Math.max(1, d - 0.25))} />}
+      <StillWorld {...props} onReady={ready} />
     </Canvas>
   );
 }

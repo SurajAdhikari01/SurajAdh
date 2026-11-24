@@ -38,7 +38,7 @@
 @keyframes xp-bob { 50% { transform: translateY(5px); } }
 
 .xp-links { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.4rem; }
-.xp-link { display: inline-flex; align-items: center; gap: .35rem; padding: .55rem .9rem; border: 1px solid var(--line); border-radius: 99px; background: #0c0a1038; color: var(--ink); font-size: 13.5px; cursor: pointer; backdrop-filter: blur(10px); transition: background .3s, border-color .3s, transform .3s; }
+.xp-link { display: inline-flex; align-items: center; gap: .35rem; padding: .55rem .9rem; border: 1px solid var(--line); border-radius: 99px; background: #0c0a1073; color: var(--ink); font-size: 13.5px; cursor: pointer; transition: background .3s, border-color .3s, transform .3s; }
 .xp-link:hover { transform: translateY(-2px); border-color: var(--ink); background: #ffffff1f; }
 
 .xp-facts { margin-top: 1.4rem; border-top: 1px solid var(--line); }
@@ -80,7 +80,7 @@
 .xp-top > * { pointer-events: auto; }
 .xp-brand { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .xp-controls { display: flex; gap: 8px; }
-.xp-round, .xp-pill { display: inline-flex; height: 40px; align-items: center; justify-content: center; border: 1px solid var(--line); background: #ffffff12; color: var(--ink); cursor: pointer; backdrop-filter: blur(14px); transition: background .3s, border-color .3s; }
+.xp-round, .xp-pill { display: inline-flex; height: 40px; align-items: center; justify-content: center; border: 1px solid var(--line); background: #0c0a1047; color: var(--ink); cursor: pointer; transition: background .3s, border-color .3s; }
 .xp-round { width: 40px; border-radius: 50%; }
 .xp-pill { gap: .45rem; padding-inline: 1rem; border-radius: 99px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
 .xp-round:hover, .xp-pill:hover { border-color: var(--ink); background: #ffffff26; }
@@ -102,7 +102,7 @@
 .xp-count em { font-style: normal; color: var(--ink-dim); }
 
 /* Station name, pinned in the scene over the active summit. */
-.xp-pin { display: flex; align-items: center; gap: .5rem; padding: .35rem .7rem; border: 1px solid color-mix(in oklab, var(--tag) 60%, transparent); border-radius: 99px; background: #0d0b12a6; color: #fff; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; backdrop-filter: blur(8px); animation: xp-pin-in .8s .5s both cubic-bezier(.22,1,.36,1); }
+.xp-pin { display: flex; align-items: center; gap: .5rem; padding: .35rem .7rem; border: 1px solid color-mix(in oklab, var(--tag) 60%, transparent); border-radius: 99px; background: #0d0b12a6; color: #fff; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; animation: xp-pin-in .8s .5s both cubic-bezier(.22,1,.36,1); }
 .xp-pin span { color: var(--tag); }
 @keyframes xp-pin-in { from { opacity: 0; transform: translateY(8px); } }
 

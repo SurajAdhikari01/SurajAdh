@@ -77,6 +77,8 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
     if (loaded) scroller.current?.focus({ preventScroll: true });
   }, [loaded]);
 
+  const onReady = useCallback(() => setReady(true), []);
+
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
@@ -122,7 +124,7 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
         reducedMotion={reducedMotion}
         altitude={altitude}
         playhead={playhead as RefObject<number>}
-        onReady={() => setReady(true)}
+        onReady={onReady}
         eventRoot={root}
       />
       <div className="xp-scrim" aria-hidden="true" />
