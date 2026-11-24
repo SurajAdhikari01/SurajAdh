@@ -22,7 +22,6 @@ import {
   sheetWidth,
   inscriptions,
   nearTrail,
-  metres,
   rng,
   trailPoint,
 } from "./world";
@@ -37,7 +36,6 @@ type Props = {
   active: number;
   night: boolean;
   reducedMotion: boolean;
-  altitude: RefObject<HTMLElement | null>;
   /** Where the camera actually is, in chapters; it trails the scroll. */
   playhead: RefObject<number>;
   onReady: () => void;
@@ -1317,7 +1315,12 @@ function Cloth({ pin, width, height, texture, wind, seed, href, fly }: ClothProp
       frustumCulled={false}
       onPointerOver={href ? (e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = "pointer"; } : undefined}
       onPointerOut={href ? () => { setHover(false); document.body.style.cursor = ""; } : undefined}
-      onClick={href ? (e) => { e.stopPropagation(); window.open(href, "_blank", "noopener,noreferrer"); } : undefined}
+      onClick={href ? (e) => {
+        e.stopPropagation();
+        // Mail opens the mail app in place; web links get a tab of their own.
+        if (href.startsWith("mailto:")) window.location.href = href;
+        else window.open(href, "_blank", "noopener,noreferrer");
+      } : undefined}
     />
   );
 }
@@ -1546,12 +1549,19 @@ function RopeFlags({ start, end, sag, wind }: { start: THREE.Vector3; end: THREE
     const cloth = pitch * 0.84;
     const count = Math.max(3, Math.floor((span - 0.6) / pitch));
     const first = (span - count * pitch) / 2 / span;
+    // Near the stake the rope runs low over the snow: leave it bare there,
+    // as real strings are, rather than burying a flag in the ground.
+    const hang = cloth * (400 / 512) * 1.15 + 0.08;
+    const clear = (t: number) => {
+      const p = along(t);
+      return p.y - hang > heightAt(p.x, p.z);
+    };
     const flags = Array.from({ length: count }, (_, k) => {
       const t0 = first + (k * pitch + (pitch - cloth) / 2) / span;
       const t1 = t0 + cloth / span;
-      return { colour: LUNGTA[k % 5], pin: (u: number) => along(t0 + (t1 - t0) * u).add(new THREE.Vector3(0, -0.015, 0)) };
-    });
-    return { points, flags, cloth };
+      return { t0, t1, colour: LUNGTA[k % 5], pin: (u: number) => along(t0 + (t1 - t0) * u).add(new THREE.Vector3(0, -0.015, 0)) };
+    }).filter((f) => clear(f.t0) && clear((f.t0 + f.t1) / 2) && clear(f.t1));
+    return { points, flags, cloth, foot: heightAt(end.x, end.z) - 0.3 };
   }, [start, end, sag]);
   const textures = useMemo(() => rig.flags.map((f) => paintFlag("", null, f.colour)), [rig]);
   useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
@@ -1561,9 +1571,9 @@ function RopeFlags({ start, end, sag, wind }: { start: THREE.Vector3; end: THREE
       {rig.flags.map((f, i) => (
         <Cloth key={i} pin={f.pin} width={rig.cloth} height={rig.cloth * (400 / 512)} texture={textures[i]} wind={wind} seed={i * 2.3 + 1} />
       ))}
-      {/* The stake the rope is tied off to. */}
-      <mesh position={[end.x, end.y - 0.25, end.z]} rotation-z={0.12}>
-        <cylinderGeometry args={[0.03, 0.035, 0.9, 6]} />
+      {/* The stake the rope is tied off to, driven into the snow. */}
+      <mesh position={[end.x, (end.y + 0.12 + rig.foot) / 2, end.z]}>
+        <cylinderGeometry args={[0.03, 0.035, end.y + 0.12 - rig.foot, 6]} />
         <meshStandardMaterial color="#8b7355" roughness={0.9} />
       </mesh>
     </>
@@ -1578,6 +1588,8 @@ function SummitFlag({ at, chapter, projects }: { at: Inscription; chapter: Chapt
   const panel = useMemo(() => panelFor(chapter, projects), [chapter, projects]);
   const { texture, aspect } = useMemo(() => paintBanner(panel), [panel]);
   useEffect(() => () => texture.dispose(), [texture]);
+  // The flag carries the email address: a click on it writes to it.
+  const mail = panel.actions.find((a) => a.href.startsWith("mailto:"))?.href;
   const rig = useMemo(() => {
     const centre = new THREE.Vector3(...at.center);
     const toward = new THREE.Vector3(at.facing[0], 0, at.facing[2]).normalize();
@@ -1598,8 +1610,9 @@ function SummitFlag({ at, chapter, projects }: { at: Inscription; chapter: Chapt
     // Prayer flags tied below the summit flag, running down and out to the
     // left to a stake in the snow, clear of the flag and its words.
     const ropeStart = new THREE.Vector3(foot.x, top - height - 0.35, foot.z).addScaledVector(toward, -0.05);
-    const ropeEnd = new THREE.Vector3(foot.x, 0, foot.z).addScaledVector(right, -4.6).addScaledVector(toward, 0.6);
-    ropeEnd.y = heightAt(ropeEnd.x, ropeEnd.z) + 0.2;
+    const ropeEnd = new THREE.Vector3(foot.x, 0, foot.z).addScaledVector(right, -3.3).addScaledVector(toward, 0.5);
+    // Tied off high on a stake, so the flags hang clear of the snow.
+    ropeEnd.y = heightAt(ropeEnd.x, ropeEnd.z) + 1.15;
     const ropeWind = right.clone().multiplyScalar(1.6).addScaledVector(toward, 0.8).add(new THREE.Vector3(0, 0.2, 0));
     return { width, height, pole, pin, fly, wind, ropeStart, ropeEnd, ropeWind };
   }, [at, aspect]);
@@ -1613,8 +1626,8 @@ function SummitFlag({ at, chapter, projects }: { at: Inscription; chapter: Chapt
         <sphereGeometry args={[0.08, 12, 8]} />
         <meshStandardMaterial color="#d4a72c" metalness={0.6} roughness={0.35} />
       </mesh>
-      <Cloth pin={rig.pin} width={rig.width} height={rig.height} texture={texture} wind={rig.wind} seed={4.2} fly={rig.fly} />
-      <RopeFlags start={rig.ropeStart} end={rig.ropeEnd} sag={0.25} wind={rig.ropeWind} />
+      <Cloth pin={rig.pin} width={rig.width} height={rig.height} texture={texture} wind={rig.wind} seed={4.2} fly={rig.fly} href={mail} />
+      <RopeFlags start={rig.ropeStart} end={rig.ropeEnd} sag={0.15} wind={rig.ropeWind} />
     </group>
   );
 }
@@ -1637,7 +1650,7 @@ function clearView(from: THREE.Vector3, to: THREE.Vector3) {
   return true;
 }
 
-function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "progress" | "playhead" | "reducedMotion" | "altitude">) {
+function Flight({ progress, playhead, reducedMotion }: Pick<Props, "progress" | "playhead" | "reducedMotion">) {
   const camera = useThree((s) => s.camera);
   const size = useThree((s) => s.size);
   const pointer = useRef({ x: 0, y: 0 });
@@ -1660,7 +1673,6 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
     right: new THREE.Vector3(),
     up: new THREE.Vector3(0, 1, 0),
     sway: { x: 0, y: 0 },
-    frame: 0,
     subject: new THREE.Vector3(),
     probe: new THREE.Vector3(),
   }), []);
@@ -1743,9 +1755,6 @@ function Flight({ progress, playhead, reducedMotion, altitude }: Pick<Props, "pr
     state.pos.y = Math.max(state.pos.y, heightAt(state.pos.x, state.pos.z) + 0.7);
     camera.position.copy(state.pos);
     camera.lookAt(state.target);
-
-    state.frame = (state.frame + 1) % 5;
-    if (!state.frame && altitude.current) altitude.current.textContent = `${metres(camera.position.y).toLocaleString()} m`;
   });
   return null;
 }
@@ -2199,7 +2208,7 @@ function GoldenSky() {
   return <Sky ref={sky} distance={4500} sunPosition={SKY_SUN} turbidity={9} rayleigh={2.4} mieCoefficient={0.007} mieDirectionalG={0.9} />;
 }
 
-function World({ projects, progress, playhead, night, reducedMotion, altitude, onReady }: Props) {
+function World({ projects, progress, playhead, night, reducedMotion, onReady }: Props) {
   const places = useMemo(() => inscriptions(), []);
   const panels = useMemo(() => CHAPTERS.map((c) => panelFor(c, projects)), [projects]);
 
@@ -2273,7 +2282,7 @@ function World({ projects, progress, playhead, night, reducedMotion, altitude, o
         return <Stone key={chapter.key} chapter={chapter} at={at} projects={projects} />;
       })}
 
-      <Flight progress={progress} playhead={playhead} reducedMotion={reducedMotion} altitude={altitude} />
+      <Flight progress={progress} playhead={playhead} reducedMotion={reducedMotion} />
 
       <Ready onReady={loaded} night={night} staged={staged} />
     </>

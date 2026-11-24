@@ -59,9 +59,9 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
   const scroller = useRef<HTMLDivElement>(null);
   const progress = useRef(0);
   const playhead = useRef(0);
-  const altitude = useRef<HTMLElement | null>(null);
   const [active, setActive] = useState(0);
   const [settled, setSettled] = useState(true);
+  const [nearStop, setNearStop] = useState(true);
   const [ready, setReady] = useState(false);
   const [night, setNight] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -104,12 +104,18 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
     setActive((prev) => (prev === next ? prev : next));
   }, []);
 
-  // Links appear once the camera has actually arrived and turned to read.
+  // The intro cue waits until the camera has actually arrived.
   useEffect(() => {
     let frame = 0;
     const tick = () => {
-      const still = Math.abs(playhead.current - Math.round(progress.current)) < 0.02;
+      const stop = Math.round(progress.current);
+      const still = Math.abs(playhead.current - stop) < 0.02;
       setSettled((prev) => (prev === still ? prev : still));
+      // Links show from a little before the camp until a little after it, so
+      // they are there while it comes into view and as the climber walks on.
+      const off = playhead.current - stop;
+      const near = off > -0.18 && off < 0.14;
+      setNearStop((prev) => (prev === near ? prev : near));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -139,7 +145,6 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
         active={active}
         night={night}
         reducedMotion={reducedMotion}
-        altitude={altitude}
         playhead={playhead as RefObject<number>}
         onReady={onReady}
         eventRoot={root}
@@ -187,13 +192,13 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {loaded && settled && (actions.length > 0 || last) && (
+        {loaded && nearStop && (actions.length > 0 || last) && (
           <motion.nav
             key={active}
             className="xp-actions"
             aria-label="Links"
             initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0, transition: { duration: 0.7, delay: 0.5, ease } }}
+            animate={{ opacity: 1, y: 0, transition: { duration: 0.6, delay: 0.15, ease } }}
             exit={{ opacity: 0, transition: { duration: 0.15 } }}
           >
             {actions.map((a) =>
@@ -234,13 +239,6 @@ export function ExploreClient({ projects }: { projects: ExploreProject[] }) {
           </button>
         ))}
       </nav>
-
-      <footer className="xp-foot" aria-hidden="true">
-        <span className="xp-rec"><i /> ALT <b ref={(el) => { altitude.current = el; }}>—</b></span>
-        <span className="xp-count">
-          {String(active + 1).padStart(2, "0")} <em>/ {String(CHAPTERS.length).padStart(2, "0")}</em>
-        </span>
-      </footer>
 
       <AnimatePresence>
         {!loaded && (

@@ -75,8 +75,8 @@
 .xp-email:hover { border-color: var(--ink); }
 
 /* ── Chrome ── */
-.xp-top, .xp-rail, .xp-foot { position: absolute; z-index: 3; opacity: 0; transition: opacity 1.2s .4s; }
-.xp.is-loaded .xp-top, .xp.is-loaded .xp-rail, .xp.is-loaded .xp-foot { opacity: 1; }
+.xp-top, .xp-rail { position: absolute; z-index: 3; opacity: 0; transition: opacity 1.2s .4s; }
+.xp.is-loaded .xp-top, .xp.is-loaded .xp-rail { opacity: 1; }
 .xp-top { top: 0; right: 0; left: 0; display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(1.25rem, 6vw, 6rem) 0; pointer-events: none; }
 .xp-top > * { pointer-events: auto; }
 .xp-brand { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
@@ -95,12 +95,6 @@
 .xp-rail button:hover i { opacity: .8; }
 .xp-rail .is-active i { width: 34px; opacity: 1; }
 
-.xp-foot { right: 0; bottom: 0; left: 0; display: flex; justify-content: space-between; padding: 0 clamp(1.25rem, 6vw, 6rem) 20px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em; pointer-events: none; text-shadow: 0 1px 8px #0008; }
-.xp-rec { display: flex; align-items: center; gap: .55rem; color: var(--ink-dim); }
-.xp-rec b { font-weight: 400; color: var(--ink); }
-.xp-rec i { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; animation: xp-blink 1.4s steps(2) infinite; }
-@keyframes xp-blink { 50% { opacity: .15; } }
-.xp-count em { font-style: normal; color: var(--ink-dim); }
 
 /* Station name, pinned in the scene over the active summit. */
 .xp-pin { display: flex; align-items: center; gap: .5rem; padding: .35rem .7rem; border: 1px solid color-mix(in oklab, var(--tag) 60%, transparent); border-radius: 99px; background: #0d0b12a6; color: #fff; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; animation: xp-pin-in .8s .5s both cubic-bezier(.22,1,.36,1); }
@@ -129,5 +123,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xp-cue svg, .xp-rec i, .xp-pin { animation: none; }
+  .xp-cue svg, .xp-pin { animation: none; }
 }
